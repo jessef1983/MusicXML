@@ -1,44 +1,98 @@
 # MusicXML Simplifier - Usage Guide
 
+## Project Structure
+
+```
+MusicXML/
+├── input-xml/          # Place your original MusicXML files here
+├── output-xml/         # Processed files will be saved here
+├── musicxml_simplifier.py
+├── MUSICXML_SIMPLIFIER_RULES.md
+└── USAGE_GUIDE.md
+```
+
 ## Quick Start
 
 ```bash
-# Basic usage
-python musicxml_simplifier.py input.musicxml output.musicxml
+# Basic usage - input from input-xml folder, output to output-xml folder
+python musicxml_simplifier.py input-xml/input.musicxml output-xml/output.musicxml
 
 # With verbose output
-python musicxml_simplifier.py input.musicxml output.musicxml --verbose
+python musicxml_simplifier.py input-xml/input.musicxml output-xml/output.musicxml --verbose
 
 # Specify rule set (currently only 'downbeat' available)
-python musicxml_simplifier.py input.musicxml output.musicxml --rules downbeat
+python musicxml_simplifier.py input-xml/input.musicxml output-xml/output.musicxml --rules downbeat
 ```
 
 ## Examples
 
 ### Convert Last Christmas trumpet part for beginners:
 ```bash
-python musicxml_simplifier.py "Last Christmas Part 3 Trumpet.musicxml" "Last Christmas Part 3 Trumpet-Simple.musicxml"
+python musicxml_simplifier.py "input-xml/Last Christmas Part 3 Trumpet.musicxml" "output-xml/Last Christmas Part 3 Trumpet-Simple.musicxml"
 ```
 
 ### Fix rehearsal marks to match measure numbers:
 ```bash
-python musicxml_simplifier.py input.musicxml output.musicxml --rehearsal measure_numbers
+python musicxml_simplifier.py input-xml/input.musicxml output-xml/output.musicxml --rehearsal measure_numbers
 ```
 
 ### Convert rehearsal marks to letters:
 ```bash
-python musicxml_simplifier.py input.musicxml output.musicxml --rehearsal letters
+python musicxml_simplifier.py input-xml/input.musicxml output-xml/output.musicxml --rehearsal letters
+```
+
+### Remove multi-measure rests for easier counting:
+```bash
+python musicxml_simplifier.py input-xml/input.musicxml output-xml/output.musicxml --remove-multimeasure-rests
+```
+
+### All beginner-friendly options combined:
+```bash
+python musicxml_simplifier.py input-xml/input.musicxml output-xml/output.musicxml \
+  --sync-part-names "Easy Version" --center-title --remove-multimeasure-rests \
+  --rehearsal letters --verbose
 ```
 
 ### Process extracted MusicXML from compressed file:
 ```bash
-# First extract .mxl file:
-copy "file.mxl" "temp.zip"
+# First extract .mxl file from input-xml folder:
+copy "input-xml/file.mxl" "temp.zip"
 expand-archive "temp.zip" "extracted"
 
-# Then simplify:
-python musicxml_simplifier.py "extracted\score.xml" "simplified.musicxml"
+# Then simplify and save to output-xml:
+python musicxml_simplifier.py "extracted/score.xml" "output-xml/simplified.musicxml"
 ```
+
+### Working with the new folder structure:
+```bash
+# Process all files from input-xml to output-xml
+# Example with the provided sample files:
+python musicxml_simplifier.py "input-xml/Last Christmas Part 3 Trumpet Original.musicxml" "output-xml/Last Christmas Part 3 Trumpet Original-Simplified.musicxml"
+```
+
+## Batch Processing
+
+For processing multiple files at once, use the batch processing helper:
+
+```bash
+# Process all files in input-xml folder
+python batch_process.py
+
+# Process with custom suffix
+python batch_process.py --suffix "Beginner"
+
+# Process with rehearsal mark fixes and verbose output
+python batch_process.py --rehearsal letters --verbose --suffix "Easy"
+
+# Preview what would be processed (dry run)
+python batch_process.py --dry-run
+```
+
+The batch processor will:
+- Automatically find all MusicXML files in the `input-xml` folder
+- Process each one using your specified settings
+- Save results to the `output-xml` folder with appropriate naming
+- Provide progress feedback and error reporting
 
 ## Rule Sets
 

@@ -25,6 +25,7 @@ class MusicXMLSimplifier:
         self.measures_processed = 0
         self.eighth_notes_converted = 0
         self.rehearsal_marks_fixed = 0
+        self.multimeasure_rests_removed = 0
         
     def apply_downbeat_rules(self, content):
         """
@@ -253,7 +254,7 @@ class MusicXMLSimplifier:
         Center the main title in the MusicXML credit section.
         
         Finds the first credit-words element with large font size (title)
-        and centers it horizontally on the page.
+        and centers it horizontally and positions it properly vertically.
         """
         
         # First, find the page width to calculate center position
@@ -265,22 +266,43 @@ class MusicXMLSimplifier:
             page_width = float(page_width_match.group(1))
             center_x = str(page_width / 2)
         
-        # Pattern to match the main title credit (typically has largest font size) 
-        # Find credit-words with large font size and justify="left"
-        title_pattern = r'(<credit-words[^>]*default-x=")[^"]*("[^>]*justify=")left("[^>]*font-size="2[0-9]")'
+        # Position title at the bottom of the header area to avoid conflicts
+        # Use a fixed position that's well below any typical header elements
+        page_height_match = re.search(r'<page-height>([\d.]+)</page-height>', content)
+        if page_height_match:
+            page_height = float(page_height_match.group(1))
+            # Position title at about 15% down from top (85% of page height)
+            title_y = str(page_height * 0.85)
+            print(f"  Positioning title at bottom of header area: Y={title_y} (85% of page height)")
+        else:
+            # Fallback to a low position in the header
+            title_y = "1350"
+            print(f"  Using fallback title position: Y={title_y}")
         
-        def replace_title_formatting(match):
-            start_part = match.group(1)
-            middle_part = match.group(2) 
-            end_part = match.group(3)
-            
-            print(f"  Centering title (font-size 20+)")
-            print(f"  Position: x={center_x} (page center)")
-            
-            return start_part + center_x + middle_part + "center" + end_part
+        # Target specifically the title element (the one WITHOUT font-size="14")
+        # Step 1: Update X coordinate (horizontal centering) - only for non-part-name elements
+        content = re.sub(
+            r'(<credit-words(?![^>]*font-size="14")[^>]*default-x=")[^"]*(")',
+            lambda m: m.group(1) + center_x + m.group(2),
+            content
+        )
         
-        # Apply the title centering
-        content = re.sub(title_pattern, replace_title_formatting, content, flags=re.MULTILINE | re.DOTALL)
+        # Step 2: Update Y coordinate (vertical positioning) - only for non-part-name elements
+        content = re.sub(
+            r'(<credit-words(?![^>]*font-size="14")[^>]*default-y=")[^"]*(")',
+            lambda m: m.group(1) + title_y + m.group(2),
+            content
+        )
+        
+        # Step 3: Update justify to center - only for non-part-name elements
+        content = re.sub(
+            r'(<credit-words(?![^>]*font-size="14")[^>]*justify=")left(")',
+            lambda m: m.group(1) + "center" + m.group(2),
+            content
+        )
+        
+        print(f"  Centering title")
+        print(f"  Position: x={center_x}, y={title_y}")
         
         return content
     
@@ -334,7 +356,173 @@ class MusicXMLSimplifier:
         
         return content
     
-    def simplify_file(self, input_path, output_path, rules='downbeat', fix_rehearsal='measure_numbers', center_title=False, sync_part_names=None):
+    def clean_credit_text(self, content):
+        """
+        Clean up credit text formatting for better MuseScore compatibility.
+        
+        1. Joins lines within individual credit-words elements
+        2. Consolidates multiple credit-words elements in the same credit block  
+        3. Replaces problematic characters that can cause truncation in MuseScore
+        4. Normalizes whitespace
+        
+        MuseScore and many other notation programs can truncate credit text when they
+        encounter certain special characters or XML entities. This function ensures
+        maximum compatibility by converting problematic characters to safe alternatives.
+        """
+        
+        print("Cleaning up credit text formatting...")
+        
+        # First, clean up individual credit-words elements (join internal newlines)
+        credit_pattern = r'(<credit-words[^>]*>)(.*?)(</credit-words>)'
+        
+        def clean_credit_content(match):
+            opening_tag = match.group(1)
+            content_text = match.group(2)
+            closing_tag = match.group(3)
+            
+            # Clean the content: join lines with spaces and normalize whitespace
+            cleaned_text = re.sub(r'\s*\n\s*', ' ', content_text.strip())
+            cleaned_text = re.sub(r'\s+', ' ', cleaned_text)
+            
+            return opening_tag + cleaned_text + closing_tag
+        
+        # Apply the cleanup using DOTALL flag to match across newlines
+        content = re.sub(credit_pattern, clean_credit_content, content, flags=re.DOTALL)
+        
+        # Second, consolidate multiple credit-words elements within the same credit block
+        # This is crucial for MuseScore compatibility
+        credit_block_pattern = r'(<credit[^>]*>)(.*?)(</credit>)'
+        
+        def consolidate_credit_words(match):
+            opening_credit = match.group(1)
+            credit_content = match.group(2)
+            closing_credit = match.group(3)
+            
+            # Find all credit-words elements in this credit block
+            words_pattern = r'<credit-words([^>]*)>([^<]*)</credit-words>'
+            credit_words_matches = list(re.finditer(words_pattern, credit_content))
+            
+            if len(credit_words_matches) <= 1:
+                return match.group(0)  # No consolidation needed
+            
+            # Extract attributes from the first credit-words (positioning, formatting)
+            first_attributes = credit_words_matches[0].group(1)
+            
+            # Collect all text content and decode HTML entities
+            all_text = []
+            for words_match in credit_words_matches:
+                text = words_match.group(2).strip()
+                if text:  # Only add non-empty text
+                    # Decode HTML entities and replace problematic characters for MuseScore compatibility
+                    text = text.replace('&amp;', 'and')  # Replace & with "and" for better compatibility
+                    text = text.replace('&lt;', '<')
+                    text = text.replace('&gt;', '>')
+                    text = text.replace('&quot;', '"')
+                    text = text.replace('&#39;', "'")
+                    text = text.replace('&apos;', "'")
+                    
+                    # Handle additional problematic characters that may cause truncation
+                    text = text.replace('©', '(c)')      # Copyright symbol
+                    text = text.replace('®', '(r)')      # Registered trademark
+                    text = text.replace('™', '(tm)')     # Trademark symbol
+                    text = text.replace('°', 'deg')      # Degree symbol
+                    text = text.replace('†', '+')        # Dagger symbol
+                    text = text.replace('‡', '++')       # Double dagger
+                    text = text.replace('§', 'section')  # Section symbol
+                    text = text.replace('¶', 'para')     # Paragraph symbol
+                    
+                    # Handle common Unicode quotes and dashes that may cause issues
+                    text = text.replace('"', '"')        # Left double quote
+                    text = text.replace('"', '"')        # Right double quote  
+                    text = text.replace(''', "'")        # Left single quote
+                    text = text.replace(''', "'")        # Right single quote
+                    text = text.replace('–', '-')        # En dash
+                    text = text.replace('—', '--')       # Em dash
+                    text = text.replace('…', '...')      # Ellipsis
+                    
+                    # Handle musical symbols that might be problematic in credits
+                    text = text.replace('♭', 'b')        # Flat symbol
+                    text = text.replace('♯', '#')        # Sharp symbol
+                    text = text.replace('♮', 'natural')  # Natural symbol
+                    
+                    # Handle fraction symbols
+                    text = text.replace('½', '1/2')
+                    text = text.replace('¼', '1/4') 
+                    text = text.replace('¾', '3/4')
+                    text = text.replace('⅓', '1/3')
+                    text = text.replace('⅔', '2/3')
+                    all_text.append(text)
+            
+            if not all_text:
+                return match.group(0)  # No text to consolidate
+            
+            # Join all text with spaces - let MuseScore handle word wrapping
+            consolidated_text = ' - '.join(all_text)
+            
+            # Create new consolidated credit-words element
+            new_credit_words = f'    <credit-words{first_attributes}>{consolidated_text}</credit-words>'
+            
+            # Remove the old credit-words elements and replace with consolidated one
+            cleaned_content = re.sub(r'\s*<credit-words[^>]*>[^<]*</credit-words>\s*', '', credit_content)
+            cleaned_content = cleaned_content.strip() + '\n' + new_credit_words + '\n    '
+            
+            print(f"  Consolidated {len(credit_words_matches)} credit-words into single element")
+            
+            return opening_credit + cleaned_content + closing_credit
+        
+        # Apply credit block consolidation using DOTALL flag
+        content = re.sub(credit_block_pattern, consolidate_credit_words, content, flags=re.DOTALL)
+        
+        return content
+    
+    def remove_multimeasure_rests(self, content):
+        """
+        Convert multi-measure rests into individual measure rests for easier counting.
+        
+        Multi-measure rests (like a rest spanning 4 measures) can be confusing for
+        beginners. This converts them into separate single-measure rests that are
+        easier to count and follow along with.
+        
+        Handles both:
+        1. <multiple-rest>N</multiple-rest> notation
+        2. Individual measures with <rest measure="yes"/> in sequence
+        """
+        
+        print("Removing multi-measure rests...")
+        
+        multimeasure_rests_removed = 0
+        
+        # First, handle explicit <multiple-rest> elements and remove them
+        # These indicate how many measures the rest spans
+        multiple_rest_pattern = r'<measure-style>\s*<multiple-rest>(\d+)</multiple-rest>\s*</measure-style>'
+        
+        def remove_multiple_rest_directive(match):
+            nonlocal multimeasure_rests_removed
+            count = int(match.group(1))
+            multimeasure_rests_removed += 1
+            print(f"  Removing {count}-measure rest directive")
+            return ''  # Remove the multiple-rest directive entirely
+        
+        content = re.sub(multiple_rest_pattern, remove_multiple_rest_directive, content)
+        
+        # Second, convert all <rest measure="yes"/> to regular rests
+        # This standardizes how rests appear for beginners
+        measure_rest_pattern = r'<rest[^>]*measure="yes"[^>]*/>'
+        
+        def convert_measure_rest(match):
+            print(f"  Converting measure rest to standard rest")
+            return '<rest/>'
+        
+        content = re.sub(measure_rest_pattern, convert_measure_rest, content)
+        
+        # Also handle the self-closing version
+        measure_rest_pattern2 = r'<rest[^>]*measure="yes"[^>]*></rest>'
+        content = re.sub(measure_rest_pattern2, '<rest></rest>', content)
+        
+        self.multimeasure_rests_removed = multimeasure_rests_removed
+        return content
+    
+    def simplify_file(self, input_path, output_path, rules='downbeat', fix_rehearsal='measure_numbers', center_title=False, sync_part_names=None, clean_credits=True, remove_multimeasure_rests=False):
         """
         Simplify a MusicXML file and save the result.
         
@@ -376,6 +564,16 @@ class MusicXMLSimplifier:
             simplified_content = self.sync_part_names(simplified_content, sync_part_names)
             if self.rehearsal_marks_fixed > 0:
                 self.rules_applied.append(f'rehearsal_marks_{fix_rehearsal}')
+        
+        # Clean up credit text formatting if requested
+        if clean_credits:
+            print(f"\nCleaning credit text...")
+            simplified_content = self.clean_credit_text(simplified_content)
+        
+        # Remove multi-measure rests if requested
+        if remove_multimeasure_rests:
+            print(f"\nRemoving multi-measure rests...")
+            simplified_content = self.remove_multimeasure_rests(simplified_content)
         
         # Update title/metadata to indicate simplification
         # Only auto-update part name if we're not using custom part names
@@ -425,6 +623,7 @@ class MusicXMLSimplifier:
         print(f"Measures processed: {self.measures_processed}")
         print(f"Eighth notes converted: {self.eighth_notes_converted}")
         print(f"Rehearsal marks fixed: {self.rehearsal_marks_fixed}")
+        print(f"Multi-measure rests removed: {self.multimeasure_rests_removed}")
         print(f"Rules applied: {', '.join(self.rules_applied)}")
         print("=== End Summary ===\n")
 
@@ -448,6 +647,10 @@ def main():
                        help='Center the main title horizontally on the page')
     parser.add_argument('--sync-part-names', type=str, metavar='NAME',
                        help='Update all part name references to the specified name (e.g., "Part 3 Trumpet Easy")')
+    parser.add_argument('--no-clean-credits', action='store_true',
+                       help='Skip cleaning up multi-line credit text (credit cleaning is enabled by default)')
+    parser.add_argument('--remove-multimeasure-rests', action='store_true',
+                       help='Convert multi-measure rests into individual measure rests for easier counting')
     parser.add_argument('--verbose', '-v', action='store_true',
                        help='Print detailed progress information')
     
@@ -475,7 +678,8 @@ def main():
         print(f"Part name sync: '{args.sync_part_names}'")
     
     rehearsal_mode = None if args.rehearsal == 'none' else args.rehearsal
-    success = simplifier.simplify_file(args.input, args.output, args.rules, rehearsal_mode, args.center_title, args.sync_part_names)
+    clean_credits = not args.no_clean_credits  # Clean credits by default, disable with --no-clean-credits
+    success = simplifier.simplify_file(args.input, args.output, args.rules, rehearsal_mode, args.center_title, args.sync_part_names, clean_credits, args.remove_multimeasure_rests)
     
     if success:
         print("✓ Simplification completed successfully!")
