@@ -27,6 +27,52 @@ class MusicXMLSimplifier:
         self.rehearsal_marks_fixed = 0
         self.multimeasure_rests_removed = 0
         
+        # Instrument correction definitions
+        self.INSTRUMENT_CORRECTIONS = {
+            'bb_trumpet': {
+                'name': 'Trumpet',
+                'transpose_chromatic': -2,  # Down a major 2nd (matches working Last Christmas file)
+                'transpose_diatonic': -1,
+                'instrument_sound': 'brass.trumpet.bflat',
+                'midi_program': 57  # Trumpet
+            },
+            'concert_pitch': {
+                'name': 'Concert Pitch',
+                'transpose_chromatic': 0,   # No transposition
+                'transpose_diatonic': 0,
+                'instrument_sound': 'keyboard.piano',
+                'midi_program': 1   # Piano (neutral)
+            },
+            'flute': {
+                'name': 'Flute',
+                'transpose_chromatic': 0,   # No transposition (concert pitch)
+                'transpose_diatonic': 0,
+                'instrument_sound': 'wind.flutes.flute',
+                'midi_program': 74   # Flute
+            },
+            'eb_alto_sax': {
+                'name': 'Alto Saxophone',
+                'transpose_chromatic': -9,  # Down a major 6th (Eb instrument)
+                'transpose_diatonic': -5,
+                'instrument_sound': 'reed.saxophone.alto',
+                'midi_program': 66  # Alto Sax
+            },
+            'f_horn': {
+                'name': 'Horn',
+                'transpose_chromatic': -7,  # Down a perfect 5th (F instrument)
+                'transpose_diatonic': -4,
+                'instrument_sound': 'brass.french-horn',
+                'midi_program': 61  # French Horn
+            },
+            'bb_clarinet': {
+                'name': 'Clarinet',
+                'transpose_chromatic': -2,  # Down a major 2nd (same as Bb trumpet)
+                'transpose_diatonic': -1,
+                'instrument_sound': 'wind.reed.clarinet.bflat',
+                'midi_program': 72  # Clarinet
+            }
+        }
+        
     def apply_downbeat_rules(self, content):
         """
         Apply downbeat simplification rules to MusicXML content.
@@ -373,6 +419,80 @@ class MusicXMLSimplifier:
         
         return content
     
+    def correct_instrument_metadata(self, content, instrument_key):
+        """
+        Correct instrument metadata to match the specified source instrument.
+        Fixes transposition, instrument sound, and MIDI program settings.
+        
+        Args:
+            content: MusicXML content as string
+            instrument_key: Key from INSTRUMENT_CORRECTIONS dict
+        """
+        if instrument_key not in self.INSTRUMENT_CORRECTIONS:
+            print(f"  Warning: Unknown instrument '{instrument_key}', skipping correction")
+            return content
+            
+        correction = self.INSTRUMENT_CORRECTIONS[instrument_key]
+        print(f"  Correcting instrument metadata for: {correction['name']}")
+        
+        # Update transposition settings - only if incorrect or missing
+        existing_transpose = re.search(r'<transpose>.*?<chromatic>([^<]+)</chromatic>.*?</transpose>', content, re.DOTALL)
+        
+        if correction['transpose_chromatic'] != 0:
+            # Check if existing transposition is correct
+            if existing_transpose:
+                existing_chromatic = int(existing_transpose.group(1))
+                if existing_chromatic == correction['transpose_chromatic']:
+                    print(f"    Transposition already correct: {correction['transpose_chromatic']} semitones")
+                else:
+                    # Replace existing transpose block
+                    transpose_block = f"""        <transpose>
+          <diatonic>{correction['transpose_diatonic']}</diatonic>
+          <chromatic>{correction['transpose_chromatic']}</chromatic>
+        </transpose>"""
+                    transpose_pattern = r'\s*<transpose>.*?</transpose>'
+                    content = re.sub(transpose_pattern, '\n' + transpose_block, content, flags=re.DOTALL)
+                    print(f"    Updated transposition: {existing_chromatic} -> {correction['transpose_chromatic']} semitones")
+            else:
+                # Add transpose block after clef
+                transpose_block = f"""        <transpose>
+          <diatonic>{correction['transpose_diatonic']}</diatonic>
+          <chromatic>{correction['transpose_chromatic']}</chromatic>
+        </transpose>"""
+                clef_pattern = r'(\s*</clef>\s*)'
+                replacement = r'\1' + transpose_block + '\n'
+                content = re.sub(clef_pattern, replacement, content)
+                print(f"    Added transposition: {correction['transpose_chromatic']} semitones")
+        else:
+            # Remove transposition for concert pitch
+            if existing_transpose:
+                transpose_pattern = r'\s*<transpose>.*?</transpose>\s*\n?'
+                content = re.sub(transpose_pattern, '', content, flags=re.DOTALL)
+                print("    Removed transposition (now concert pitch)")
+        
+        # Update instrument name
+        name_pattern = r'(<instrument-name>)[^<]*(</instrument-name>)'
+        if re.search(name_pattern, content):
+            replacement = f'\\g<1>{correction["name"]}\\g<2>'
+            content = re.sub(name_pattern, replacement, content)
+            print(f"    Updated instrument name: {correction['name']}")
+        
+        # Update instrument sound
+        sound_pattern = r'(<instrument-sound>)[^<]*(</instrument-sound>)'
+        if re.search(sound_pattern, content):
+            replacement = f'\\g<1>{correction["instrument_sound"]}\\g<2>'
+            content = re.sub(sound_pattern, replacement, content)
+            print(f"    Updated instrument sound: {correction['instrument_sound']}")
+        
+        # Update MIDI program
+        program_pattern = r'(<midi-program>)[^<]*(</midi-program>)'
+        if re.search(program_pattern, content):
+            replacement = f'\\g<1>{correction["midi_program"]}\\g<2>'
+            content = re.sub(program_pattern, replacement, content)
+            print(f"    Updated MIDI program: {correction['midi_program']}")
+        
+        return content
+    
     def detect_part_name(self, content):
         """
         Detect the most authoritative part name from the MusicXML file.
@@ -651,7 +771,7 @@ class MusicXMLSimplifier:
         self.multimeasure_rests_removed = multimeasure_rests_removed
         return content
     
-    def simplify_file(self, input_path, output_path, rules='downbeat', fix_rehearsal='measure_numbers', center_title=False, sync_part_names=None, auto_sync_part_names=False, clean_credits=True, remove_multimeasure_rests=False):
+    def simplify_file(self, input_path, output_path, rules='downbeat', fix_rehearsal='measure_numbers', center_title=False, sync_part_names=None, auto_sync_part_names=False, source_instrument=None, clean_credits=True, remove_multimeasure_rests=False):
         """
         Simplify a MusicXML file and save the result.
         
@@ -707,6 +827,12 @@ class MusicXMLSimplifier:
                 self.rules_applied.append('auto_sync_part_names')
             else:
                 print("  No part name detected for auto-sync")
+        
+        # Correct instrument metadata if specified
+        if source_instrument:
+            print(f"\nCorrecting instrument metadata...")
+            simplified_content = self.correct_instrument_metadata(simplified_content, source_instrument)
+            self.rules_applied.append(f'instrument_correction_{source_instrument}')
         
         # Clean up credit text formatting if requested
         if clean_credits:
@@ -771,6 +897,45 @@ class MusicXMLSimplifier:
         print("=== End Summary ===\n")
 
 
+def get_instrument_selection():
+    """
+    Interactive prompt for source instrument selection.
+    Returns the selected instrument key.
+    """
+    instruments = {
+        '1': ('bb_trumpet', 'Bb Trumpet'),
+        '2': ('bb_clarinet', 'Bb Clarinet'), 
+        '3': ('f_horn', 'F French Horn'),
+        '4': ('eb_alto_sax', 'Eb Alto Saxophone'),
+        '5': ('flute', 'Flute'),
+        '6': ('concert_pitch', 'Concert Pitch (C instruments like Piano)')
+    }
+    
+    print("\n🎵 Source Instrument Selection")
+    print("=" * 50)
+    print("Please select the original instrument this music was written for:")
+    print("(This corrects PDF→MusicXML conversion inconsistencies)")
+    print()
+    
+    for key, (instrument_key, name) in instruments.items():
+        print(f"  {key}. {name}")
+    
+    print()
+    while True:
+        try:
+            choice = input("Enter your choice (1-6): ").strip()
+            if choice in instruments:
+                instrument_key, name = instruments[choice]
+                print(f"Selected: {name}")
+                print()
+                return instrument_key
+            else:
+                print("Invalid choice. Please enter 1, 2, 3, 4, 5, or 6.")
+        except (EOFError, KeyboardInterrupt):
+            print("\nOperation cancelled.")
+            return None
+
+
 def main():
     """Main function for command-line usage."""
     parser = argparse.ArgumentParser(
@@ -792,6 +957,9 @@ def main():
                        help='Update all part name references to the specified name (e.g., "Part 3 Trumpet Easy")')
     parser.add_argument('--auto-sync-part-names', action='store_true',
                        help='Auto-detect and synchronize existing part names for consistency (default in batch mode)')
+    parser.add_argument('--source-instrument', type=str, 
+                       choices=['bb_trumpet', 'concert_pitch', 'eb_alto_sax', 'f_horn', 'bb_clarinet', 'flute'],
+                       help='Correct instrument metadata to match the actual source instrument. If not specified, you will be prompted to select.')
     parser.add_argument('--no-clean-credits', action='store_true',
                        help='Skip cleaning up multi-line credit text (credit cleaning is enabled by default)')
     parser.add_argument('--remove-multimeasure-rests', action='store_true',
@@ -810,6 +978,14 @@ def main():
     if not input_path.suffix.lower() in ['.musicxml', '.xml']:
         print(f"Warning: Input file doesn't have .musicxml or .xml extension")
     
+    # Handle source instrument selection (now required)
+    source_instrument = args.source_instrument
+    if not source_instrument:
+        source_instrument = get_instrument_selection()
+        if not source_instrument:
+            print("❌ Instrument selection is required. Exiting.")
+            sys.exit(1)
+    
     # Create simplifier and process file
     simplifier = MusicXMLSimplifier()
     
@@ -826,7 +1002,7 @@ def main():
     
     rehearsal_mode = None if args.rehearsal == 'none' else args.rehearsal
     clean_credits = not args.no_clean_credits  # Clean credits by default, disable with --no-clean-credits
-    success = simplifier.simplify_file(args.input, args.output, args.rules, rehearsal_mode, args.center_title, args.sync_part_names, args.auto_sync_part_names, clean_credits, args.remove_multimeasure_rests)
+    success = simplifier.simplify_file(args.input, args.output, args.rules, rehearsal_mode, args.center_title, args.sync_part_names, args.auto_sync_part_names, source_instrument, clean_credits, args.remove_multimeasure_rests)
     
     if success:
         print("SUCCESS: Simplification completed successfully!")

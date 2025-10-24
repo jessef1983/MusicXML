@@ -16,6 +16,46 @@ import subprocess
 import argparse
 
 
+def get_instrument_selection():
+    """
+    Interactive prompt for source instrument selection.
+    Returns the selected instrument key.
+    """
+    instruments = {
+        '1': ('bb_trumpet', 'Bb Trumpet'),
+        '2': ('bb_clarinet', 'Bb Clarinet'), 
+        '3': ('f_horn', 'F French Horn'),
+        '4': ('eb_alto_sax', 'Eb Alto Saxophone'),
+        '5': ('flute', 'Flute'),
+        '6': ('concert_pitch', 'Concert Pitch (C instruments like Piano)')
+    }
+    
+    print("\n🎵 Source Instrument Selection for Batch Processing")
+    print("=" * 60)
+    print("Please select the original instrument this music was written for:")
+    print("(This corrects PDF→MusicXML conversion inconsistencies)")
+    print("(This will be applied to ALL files in the batch)")
+    print()
+    
+    for key, (instrument_key, name) in instruments.items():
+        print(f"  {key}. {name}")
+    
+    print()
+    while True:
+        try:
+            choice = input("Enter your choice (1-6): ").strip()
+            if choice in instruments:
+                instrument_key, name = instruments[choice]
+                print(f"Selected: {name} (will be applied to all files)")
+                print()
+                return instrument_key
+            else:
+                print("Invalid choice. Please enter 1, 2, 3, 4, 5, or 6.")
+        except (EOFError, KeyboardInterrupt):
+            print("\nOperation cancelled.")
+            return None
+
+
 def get_input_files():
     """Get all MusicXML files from the input-xml directory."""
     input_dir = Path("input-xml")
@@ -69,6 +109,8 @@ def process_file(input_path, output_path, args):
         cmd.append("--no-clean-credits")
     if args.remove_multimeasure_rests:
         cmd.append("--remove-multimeasure-rests")
+    if args.source_instrument:
+        cmd.extend(["--source-instrument", args.source_instrument])
     
     print(f"🔄 Processing: {input_path.name}")
     print(f"   -> Output: {output_path.name}")
@@ -107,6 +149,9 @@ def main():
                        help='Sync all part names to this value (default: auto-sync existing part names for consistency)')
     parser.add_argument('--no-auto-sync-part-names', action='store_true',
                        help='Disable automatic part name synchronization')
+    parser.add_argument('--source-instrument', type=str, 
+                       choices=['bb_trumpet', 'concert_pitch', 'eb_alto_sax', 'f_horn', 'bb_clarinet', 'flute'],
+                       help='Correct instrument metadata to match the actual source instrument (applies to all files). If not specified, you will be prompted to select.')
     parser.add_argument('--no-clean-credits', action='store_true',
                        help='Skip cleaning up multi-line credit text')
     parser.add_argument('--remove-multimeasure-rests', action='store_true', default=True,
@@ -117,6 +162,15 @@ def main():
                        help='Show what would be processed without actually doing it')
     
     args = parser.parse_args()
+    
+    # Handle source instrument selection (now required)
+    source_instrument = args.source_instrument
+    if not source_instrument:
+        source_instrument = get_instrument_selection()
+        if not source_instrument:
+            print("❌ Instrument selection is required. Exiting.")
+            return
+        args.source_instrument = source_instrument
     
     # Handle override flags that disable defaults
     if args.quiet:
