@@ -68,7 +68,7 @@ def process_file(input_path, output_path, args):
         cmd.append("--remove-multimeasure-rests")
     
     print(f"🔄 Processing: {input_path.name}")
-    print(f"   → Output: {output_path.name}")
+    print(f"   -> Output: {output_path.name}")
     
     try:
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -87,25 +87,39 @@ def main():
     parser = argparse.ArgumentParser(description="Batch process MusicXML files from input-xml to output-xml")
     parser.add_argument('--rules', default='downbeat', choices=['downbeat'],
                        help='Simplification rule set to apply')
-    parser.add_argument('--rehearsal', default='none', 
+    parser.add_argument('--rehearsal', default='measure_numbers', 
                        choices=['none', 'measure_numbers', 'letters'],
-                       help='Rehearsal mark processing mode')
+                       help='Rehearsal mark processing mode (default: measure_numbers - validates number assignments)')
     parser.add_argument('--suffix', default='Simplified',
                        help='Suffix to add to output filenames (default: Simplified)')
-    parser.add_argument('--verbose', '-v', action='store_true',
-                       help='Show detailed processing information')
-    parser.add_argument('--center-title', action='store_true',
-                       help='Center the title text')
+    parser.add_argument('--verbose', '-v', action='store_true', default=True,
+                       help='Show detailed processing information (default: enabled)')
+    parser.add_argument('--quiet', '-q', action='store_true',
+                       help='Disable verbose output')
+    parser.add_argument('--center-title', action='store_true', default=True,
+                       help='Center the title text (default: enabled)')
+    parser.add_argument('--no-center-title', action='store_true',
+                       help='Disable title centering')
     parser.add_argument('--sync-part-names', type=str,
-                       help='Sync all part names to this value')
+                       help='Sync all part names to this value (default: leave part names unchanged)')
     parser.add_argument('--no-clean-credits', action='store_true',
                        help='Skip cleaning up multi-line credit text')
-    parser.add_argument('--remove-multimeasure-rests', action='store_true',
-                       help='Convert multi-measure rests into individual measure rests')
+    parser.add_argument('--remove-multimeasure-rests', action='store_true', default=True,
+                       help='Convert multi-measure rests into individual measure rests (default: enabled)')
+    parser.add_argument('--keep-multimeasure-rests', action='store_true',
+                       help='Keep multi-measure rests as-is')
     parser.add_argument('--dry-run', action='store_true',
                        help='Show what would be processed without actually doing it')
     
     args = parser.parse_args()
+    
+    # Handle override flags that disable defaults
+    if args.quiet:
+        args.verbose = False
+    if args.no_center_title:
+        args.center_title = False
+    if args.keep_multimeasure_rests:
+        args.remove_multimeasure_rests = False
     
     # Ensure output directory exists
     output_dir = Path("output-xml")
@@ -126,7 +140,7 @@ def main():
         print("🧪 DRY RUN - showing what would be processed:")
         for input_path in input_files:
             output_path = create_output_filename(input_path, args.suffix)
-            print(f"   {input_path} → {output_path}")
+            print(f"   {input_path} -> {output_path}")
         return
     
     # Process files

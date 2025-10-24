@@ -219,7 +219,7 @@ class MusicXMLSimplifier:
                             current_mark = rehearsal_match.group(1)
                             if current_mark != current_measure:
                                 self.rehearsal_marks_fixed += 1
-                                print(f"  Fixed rehearsal mark: measure {current_measure} '{current_mark}' → '{current_measure}'")
+                                print(f"  Fixed rehearsal mark: measure {current_measure} '{current_mark}' -> '{current_measure}'")
                                 lines[j] = lines[j].replace(f'>{current_mark}</rehearsal>', f'>{current_measure}</rehearsal>')
                             break
             
@@ -241,7 +241,7 @@ class MusicXMLSimplifier:
                 
                 if current_mark != new_letter:
                     self.rehearsal_marks_fixed += 1
-                    print(f"  Fixed rehearsal mark: '{current_mark}' → '{new_letter}'")
+                    print(f"  Fixed rehearsal mark: '{current_mark}' -> '{new_letter}'")
                 
                 return rehearsal_open + new_letter + rehearsal_close
             
@@ -337,7 +337,7 @@ class MusicXMLSimplifier:
             
             # Only replace if it looks like a part name (not composer info)
             if any(word in old_name.lower() for word in ['part', 'trumpet', 'trombone', 'tuba', 'horn', 'flute', 'clarinet', 'sax', 'violin', 'viola', 'cello', 'bass', 'piano', 'guitar', 'drum']):
-                print(f"    Credit display: '{old_name.strip()}' → '{new_part_name}'")
+                print(f"    Credit display: '{old_name.strip()}' -> '{new_part_name}'")
                 return opening_tag + new_part_name + closing_tag
             return match.group(0)  # No change if not a part name
         
@@ -646,7 +646,7 @@ def main():
     parser.add_argument('--center-title', action='store_true',
                        help='Center the main title horizontally on the page')
     parser.add_argument('--sync-part-names', type=str, metavar='NAME',
-                       help='Update all part name references to the specified name (e.g., "Part 3 Trumpet Easy")')
+                       help='Update all part name references to the specified name (default: leave part names unchanged, e.g., "Part 3 Trumpet Easy")')
     parser.add_argument('--no-clean-credits', action='store_true',
                        help='Skip cleaning up multi-line credit text (credit cleaning is enabled by default)')
     parser.add_argument('--remove-multimeasure-rests', action='store_true',
@@ -668,7 +668,7 @@ def main():
     # Create simplifier and process file
     simplifier = MusicXMLSimplifier()
     
-    print(f"Simplifying '{args.input}' → '{args.output}'")
+    print(f"Simplifying '{args.input}' -> '{args.output}'")
     print(f"Using rule set: {args.rules}")
     if args.rehearsal != 'none':
         print(f"Rehearsal mark mode: {args.rehearsal}")
@@ -682,10 +682,10 @@ def main():
     success = simplifier.simplify_file(args.input, args.output, args.rules, rehearsal_mode, args.center_title, args.sync_part_names, clean_credits, args.remove_multimeasure_rests)
     
     if success:
-        print("✓ Simplification completed successfully!")
+        print("SUCCESS: Simplification completed successfully!")
         simplifier.print_summary()
     else:
-        print("✗ Simplification failed!")
+        print("ERROR: Simplification failed!")
         sys.exit(1)
 
 
