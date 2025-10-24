@@ -306,6 +306,46 @@ class MusicXMLSimplifier:
         
         return content
     
+    def detect_part_name(self, content):
+        """
+        Detect the most authoritative part name from the MusicXML file.
+        Priority: 1) score-part part-name, 2) metadata partName, 3) credit-words
+        
+        Args:
+            content: MusicXML content as string
+            
+        Returns:
+            str: The detected part name, or None if not found
+        """
+        
+        # Priority 1: Check score-part part-name (most authoritative)
+        part_name_match = re.search(r'<part-name>([^<]+)</part-name>', content)
+        if part_name_match:
+            part_name = part_name_match.group(1).strip()
+            if part_name:
+                print(f"  Detected part name from score-part: '{part_name}'")
+                return part_name
+        
+        # Priority 2: Check metadata partName
+        metadata_match = re.search(r'<miscellaneous-field name="partName">([^<]+)</miscellaneous-field>', content)
+        if metadata_match:
+            part_name = metadata_match.group(1).strip()
+            if part_name:
+                print(f"  Detected part name from metadata: '{part_name}'")
+                return part_name
+        
+        # Priority 3: Check credit-words for instrument names
+        credit_pattern = r'<credit-words[^>]*>([^<]*(?:Part|Trumpet|Trombone|Tuba|Horn|Flute|Clarinet|Saxophone|Violin|Viola|Cello|Bass|Piano|Guitar|Drum)[^<]*)</credit-words>'
+        credit_matches = re.findall(credit_pattern, content, re.IGNORECASE)
+        for credit_text in credit_matches:
+            credit_text = credit_text.strip()
+            if credit_text and len(credit_text) < 50:  # Reasonable length for part name
+                print(f"  Detected part name from credit: '{credit_text}'")
+                return credit_text
+        
+        print("  No part name detected")
+        return None
+
     def sync_part_names(self, content, new_part_name):
         """
         Synchronize all part name references throughout the MusicXML file.
@@ -326,18 +366,40 @@ class MusicXMLSimplifier:
         metadata_pattern = r'(<miscellaneous-field name="partName">)[^<]*(</miscellaneous-field>)'
         content = re.sub(metadata_pattern, r'\1' + new_part_name + r'\2', content)
         
-        # 2. Update visual credit display (find credit-words with part name)
-        # Look for credit-words that contain typical part names (contains "Part" or instrument names)
+        # 2. First, remove duplicate credit elements with identical part names
+        # Find all credit blocks that contain part names
+        credit_block_pattern = r'<credit[^>]*>.*?<credit-words[^>]*>([^<]*(?:Part|Trumpet|Trombone|Tuba|Horn|Flute|Clarinet|Saxophone|Violin|Viola|Cello|Bass|Piano|Guitar|Drum)[^<]*)</credit-words>.*?</credit>'
+        
+        credit_blocks = re.findall(credit_block_pattern, content, re.DOTALL)
+        seen_part_names = set()
+        
+        def remove_duplicate_credits(match):
+            credit_text = match.group(1).strip()
+            full_match = match.group(0)
+            
+            # If this is a part name we've seen before, remove this credit block
+            if any(word in credit_text.lower() for word in ['part', 'trumpet', 'trombone', 'tuba', 'horn', 'flute', 'clarinet', 'sax', 'violin', 'viola', 'cello', 'bass', 'piano', 'guitar', 'drum']):
+                if credit_text in seen_part_names:
+                    print(f"    Removing duplicate credit: '{credit_text}'")
+                    return ''  # Remove the duplicate
+                else:
+                    seen_part_names.add(credit_text)
+            
+            return full_match  # Keep the first occurrence
+        
+        content = re.sub(credit_block_pattern, remove_duplicate_credits, content, flags=re.DOTALL)
+        
+        # 3. Now update the remaining credit displays
         credit_pattern = r'(<credit-words[^>]*>)([^<]*(?:Part|Trumpet|Trombone|Tuba|Horn|Flute|Clarinet|Saxophone|Violin|Viola|Cello|Bass|Piano|Guitar|Drum)[^<]*)(</credit-words>)'
         
         def replace_credit_part_name(match):
             opening_tag = match.group(1)
-            old_name = match.group(2)
+            old_name = match.group(2).strip()
             closing_tag = match.group(3)
             
-            # Only replace if it looks like a part name (not composer info)
+            # Only replace if it looks like a part name
             if any(word in old_name.lower() for word in ['part', 'trumpet', 'trombone', 'tuba', 'horn', 'flute', 'clarinet', 'sax', 'violin', 'viola', 'cello', 'bass', 'piano', 'guitar', 'drum']):
-                print(f"    Credit display: '{old_name.strip()}' -> '{new_part_name}'")
+                print(f"    Credit display: '{old_name}' -> '{new_part_name}'")
                 return opening_tag + new_part_name + closing_tag
             return match.group(0)  # No change if not a part name
         
@@ -522,7 +584,7 @@ class MusicXMLSimplifier:
         self.multimeasure_rests_removed = multimeasure_rests_removed
         return content
     
-    def simplify_file(self, input_path, output_path, rules='downbeat', fix_rehearsal='measure_numbers', center_title=False, sync_part_names=None, clean_credits=True, remove_multimeasure_rests=False):
+    def simplify_file(self, input_path, output_path, rules='downbeat', fix_rehearsal='measure_numbers', center_title=False, sync_part_names=None, auto_sync_part_names=False, clean_credits=True, remove_multimeasure_rests=False):
         """
         Simplify a MusicXML file and save the result.
         
@@ -530,6 +592,12 @@ class MusicXMLSimplifier:
             input_path: Path to input MusicXML file
             output_path: Path for output file
             rules: Which rule set to apply ('downbeat', etc.)
+            fix_rehearsal: Rehearsal mark processing ('measure_numbers', 'letters', or None)
+            center_title: Whether to center the title
+            sync_part_names: Part name to sync across all references (or None)
+            auto_sync_part_names: Whether to auto-detect and sync existing part names
+            clean_credits: Whether to clean up credit text
+            remove_multimeasure_rests: Whether to convert multi-measure rests
         """
         
         # Read input file
@@ -558,12 +626,20 @@ class MusicXMLSimplifier:
             print(f"\nCentering title...")
             simplified_content = self.center_title(simplified_content)
         
-        # Sync part names if requested
+        # Sync part names if requested or auto-sync
         if sync_part_names:
             print(f"\nSynchronizing part names...")
             simplified_content = self.sync_part_names(simplified_content, sync_part_names)
             if self.rehearsal_marks_fixed > 0:
                 self.rules_applied.append(f'rehearsal_marks_{fix_rehearsal}')
+        elif auto_sync_part_names:
+            print(f"\nAuto-synchronizing part names...")
+            detected_name = self.detect_part_name(simplified_content)
+            if detected_name:
+                simplified_content = self.sync_part_names(simplified_content, detected_name)
+                self.rules_applied.append('auto_sync_part_names')
+            else:
+                print("  No part name detected for auto-sync")
         
         # Clean up credit text formatting if requested
         if clean_credits:
@@ -576,8 +652,8 @@ class MusicXMLSimplifier:
             simplified_content = self.remove_multimeasure_rests(simplified_content)
         
         # Update title/metadata to indicate simplification
-        # Only auto-update part name if we're not using custom part names
-        if not sync_part_names:
+        # Only auto-update part name if we're not using custom part names or auto-sync
+        if not sync_part_names and not auto_sync_part_names:
             simplified_content = self._update_metadata(simplified_content)
         else:
             # Just update the software credit, not the part name
@@ -646,7 +722,9 @@ def main():
     parser.add_argument('--center-title', action='store_true',
                        help='Center the main title horizontally on the page')
     parser.add_argument('--sync-part-names', type=str, metavar='NAME',
-                       help='Update all part name references to the specified name (default: leave part names unchanged, e.g., "Part 3 Trumpet Easy")')
+                       help='Update all part name references to the specified name (e.g., "Part 3 Trumpet Easy")')
+    parser.add_argument('--auto-sync-part-names', action='store_true',
+                       help='Auto-detect and synchronize existing part names for consistency (default in batch mode)')
     parser.add_argument('--no-clean-credits', action='store_true',
                        help='Skip cleaning up multi-line credit text (credit cleaning is enabled by default)')
     parser.add_argument('--remove-multimeasure-rests', action='store_true',
@@ -676,10 +754,12 @@ def main():
         print(f"Title centering: enabled")
     if args.sync_part_names:
         print(f"Part name sync: '{args.sync_part_names}'")
+    if args.auto_sync_part_names:
+        print(f"Auto-sync part names: enabled")
     
     rehearsal_mode = None if args.rehearsal == 'none' else args.rehearsal
     clean_credits = not args.no_clean_credits  # Clean credits by default, disable with --no-clean-credits
-    success = simplifier.simplify_file(args.input, args.output, args.rules, rehearsal_mode, args.center_title, args.sync_part_names, clean_credits, args.remove_multimeasure_rests)
+    success = simplifier.simplify_file(args.input, args.output, args.rules, rehearsal_mode, args.center_title, args.sync_part_names, args.auto_sync_part_names, clean_credits, args.remove_multimeasure_rests)
     
     if success:
         print("SUCCESS: Simplification completed successfully!")

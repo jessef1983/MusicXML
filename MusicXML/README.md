@@ -42,7 +42,8 @@ python musicxml_simplifier.py input-xml/your-file.musicxml output-xml/simplified
 ### Batch Processing (Process all files in input-xml folder)
 ```bash
 # Process all files with default settings (includes rhythm simplification, 
-# rehearsal mark validation, title centering, multi-measure rest removal, and verbose output)
+# rehearsal mark validation, title centering, multi-measure rest removal, 
+# auto-sync part names for consistency, and verbose output)
 python batch_process.py
 
 # Process with custom options

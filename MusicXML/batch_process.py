@@ -62,6 +62,9 @@ def process_file(input_path, output_path, args):
         cmd.append("--center-title")
     if args.sync_part_names:
         cmd.extend(["--sync-part-names", args.sync_part_names])
+    elif not args.no_auto_sync_part_names:
+        # Enable auto-sync by default
+        cmd.append("--auto-sync-part-names")
     if args.no_clean_credits:
         cmd.append("--no-clean-credits")
     if args.remove_multimeasure_rests:
@@ -101,7 +104,9 @@ def main():
     parser.add_argument('--no-center-title', action='store_true',
                        help='Disable title centering')
     parser.add_argument('--sync-part-names', type=str,
-                       help='Sync all part names to this value (default: leave part names unchanged)')
+                       help='Sync all part names to this value (default: auto-sync existing part names for consistency)')
+    parser.add_argument('--no-auto-sync-part-names', action='store_true',
+                       help='Disable automatic part name synchronization')
     parser.add_argument('--no-clean-credits', action='store_true',
                        help='Skip cleaning up multi-line credit text')
     parser.add_argument('--remove-multimeasure-rests', action='store_true', default=True,

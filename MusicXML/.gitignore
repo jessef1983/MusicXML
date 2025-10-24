@@ -47,6 +47,11 @@ tmp/
 *.backup
 *~
 
-# Test output (optional - you may want to keep these)
+# MusicXML files (keep repository focused on code)
+*.musicxml
+*.xml
+*.mxl
+
+# Test output (optional - you may want to keep these)  
 # output-xml/test-*
 # output-xml/*-test.*

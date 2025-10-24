@@ -13,7 +13,7 @@
       </encoding>
     <source>https://musescore.com/user/31007465/scores/28714408</source>
     <miscellaneous>
-      <miscellaneous-field name="partName">Clarinet - Simplified</miscellaneous-field>
+      <miscellaneous-field name="partName">Part 3 Trumpet</miscellaneous-field>
       </miscellaneous>
     </identification>
   <defaults>
@@ -69,7 +69,7 @@
     <credit-words default-x="616.9354838709677" default-y="1357.258064516129" justify="center" valign="top">2. HAPPY XMAS (War is Over)</credit-words>
     </credit>
   <credit page="1">
-    <credit-words default-x="85.725171" default-y="1511.049022" justify="left" valign="top" font-size="14">Clarinet</credit-words>
+    <credit-words default-x="85.725171" default-y="1511.049022" justify="left" valign="top" font-size="14">Part 3 Trumpet</credit-words>
     </credit>
   <part-list>
     <score-part id="P1">
