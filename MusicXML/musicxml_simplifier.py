@@ -32,11 +32,12 @@ class MusicXMLSimplifier:
         Apply downbeat simplification rules to MusicXML content.
         
         Rules:
-        1. Convert eighth note pairs to quarter notes
-        2. Keep first note's pitch and articulation
-        3. Handle rests appropriately
-        4. Remove beam elements
-        5. Maintain measure timing
+        1. Convert dotted quarter + eighth note patterns to half notes
+        2. Convert eighth note pairs to quarter notes
+        3. Keep first note's pitch and articulation
+        4. Handle rests appropriately
+        5. Remove beam elements and dots as needed
+        6. Maintain measure timing
         """
         
         lines = content.split('\n')
@@ -50,8 +51,34 @@ class MusicXMLSimplifier:
             if '<measure number=' in line:
                 self.measures_processed += 1
                 
+            # Look for dotted quarter + eighth note patterns to convert
+            if self._is_dotted_quarter_start(lines, i):
+                # Find the complete dotted quarter note block
+                note_block, next_index = self._extract_note_block(lines, i)
+                
+                # Check if the next note is an eighth note
+                if next_index < len(lines):
+                    next_block, final_index = self._extract_note_block(lines, next_index)
+                    
+                    # If we have dotted quarter + eighth, convert to half note
+                    if (self._is_dotted_quarter_block(note_block) and 
+                        self._is_eighth_note_block(next_block)):
+                        
+                        # Convert dotted quarter to half note, swallow the eighth
+                        simplified_block = self._convert_to_half_note(note_block)
+                        result_lines.extend(simplified_block)
+                        
+                        # Skip the eighth note (it gets absorbed into the half)
+                        i = final_index
+                        self.eighth_notes_converted += 2  # Count as converting the pattern
+                        continue
+                
+                # If not followed by eighth, add dotted quarter as-is
+                result_lines.extend(note_block)
+                i = next_index
+                
             # Look for eighth note patterns to convert
-            if self._is_eighth_note_start(lines, i):
+            elif self._is_eighth_note_start(lines, i):
                 # Find the complete note block
                 note_block, next_index = self._extract_note_block(lines, i)
                 
@@ -145,6 +172,24 @@ class MusicXMLSimplifier:
         block_text = '\n'.join(block)
         return '<type>eighth</type>' in block_text and '<rest/>' in block_text
     
+    def _is_dotted_quarter_start(self, lines, index):
+        """Check if this line starts a dotted quarter note block."""
+        # Look ahead a few lines to see if this is a dotted quarter note
+        for i in range(index, min(index + 15, len(lines))):
+            if '<type>quarter</type>' in lines[i]:
+                # Check for dot in the next few lines (matches both <dot/> and <dot .../>)
+                for j in range(i, min(i + 5, len(lines))):
+                    if '<dot' in lines[j] and '/>' in lines[j]:
+                        return True
+        return False
+    
+    def _is_dotted_quarter_block(self, block):
+        """Check if this block represents a dotted quarter note."""
+        block_text = '\n'.join(block)
+        return ('<type>quarter</type>' in block_text and 
+                '<dot' in block_text and '/>' in block_text and 
+                '<pitch>' in block_text)
+    
     def _convert_to_quarter_note(self, note_block):
         """Convert an eighth note block to a quarter note block."""
         converted_block = []
@@ -176,6 +221,28 @@ class MusicXMLSimplifier:
             elif '<type>eighth</type>' in line:
                 converted_block.append(line.replace('<type>eighth</type>', '<type>quarter</type>'))
             # Skip beam elements (shouldn't be in rests, but just in case)
+            elif '<beam number=' in line:
+                continue
+            else:
+                converted_block.append(line)
+        
+        return converted_block
+    
+    def _convert_to_half_note(self, dotted_quarter_block):
+        """Convert a dotted quarter note block to a half note block."""
+        converted_block = []
+        
+        for line in dotted_quarter_block:
+            # Convert duration from 3 (dotted quarter) to 4 (half note)
+            if '<duration>3</duration>' in line:
+                converted_block.append(line.replace('<duration>3</duration>', '<duration>4</duration>'))
+            # Convert type from quarter to half
+            elif '<type>quarter</type>' in line:
+                converted_block.append(line.replace('<type>quarter</type>', '<type>half</type>'))
+            # Remove dot element (handles both <dot/> and <dot .../>)
+            elif '<dot' in line and '/>' in line:
+                continue
+            # Skip beam elements
             elif '<beam number=' in line:
                 continue
             else:
