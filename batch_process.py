@@ -111,6 +111,9 @@ def process_file(input_path, output_path, args):
         cmd.append("--remove-multimeasure-rests")
     if args.source_instrument:
         cmd.extend(["--source-instrument", args.source_instrument])
+    if args.add_fingerings:
+        cmd.append("--add-fingerings")
+        cmd.extend(["--fingering-style", args.fingering_style])
     
     print(f"🔄 Processing: {input_path.name}")
     print(f"   -> Output: {output_path.name}")
@@ -172,6 +175,11 @@ def main():
                        help='Keep multi-measure rests as-is')
     parser.add_argument('--dry-run', action='store_true',
                        help='Show what would be processed without actually doing it')
+    parser.add_argument('--add-fingerings', action='store_true',
+                       help='Add saxophone fingering notations to notes (only for alto sax)')
+    parser.add_argument('--fingering-style', default='numbers',
+                       choices=['numbers', 'holes', 'both'],
+                       help='Style of fingering notation: numbers (simple), holes (diagram), or both')
     
     args = parser.parse_args()
     

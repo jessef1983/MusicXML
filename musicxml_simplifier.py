@@ -75,6 +75,48 @@ class MusicXMLSimplifier:
             }
         }
         
+        # Alto Saxophone Fingering Chart Database
+        # Key: (step, alter, octave) - Value: {'fingering': str, 'holes': [bool, ...]}
+        # Holes represent: [LH-Thumb, LH-1, LH-2, LH-3, RH-1, RH-2, RH-3, RH-4, Octave-Key]
+        # True = closed/pressed, False = open
+        self.ALTO_SAX_FINGERINGS = {
+            # Lower register - Bb3 to C5 (no octave key)
+            ('B', -1, 3): {'fingering': '123 123C', 'holes': [True, True, True, True, True, True, True, True, False]},  # Bb3 (low Bb with C key)
+            ('B', 0, 3): {'fingering': '123 123', 'holes': [True, True, True, True, True, True, True, False, False]},   # B3 (low B)
+            ('C', 0, 4): {'fingering': '123 12', 'holes': [True, True, True, True, True, True, False, False, False]},   # C4 (low C)
+            ('C', 1, 4): {'fingering': '123 1', 'holes': [True, True, True, True, True, False, False, False, False]},   # C#4 (low C#)
+            ('D', -1, 4): {'fingering': '123 1', 'holes': [True, True, True, True, True, False, False, False, False]},  # Db4 (same as C#4)
+            ('D', 0, 4): {'fingering': '123', 'holes': [True, True, True, True, False, False, False, False, False]},    # D4 (low D)
+            ('D', 1, 4): {'fingering': '12', 'holes': [True, True, True, False, False, False, False, False, False]},    # D#4 (Eb)
+            ('E', -1, 4): {'fingering': '12', 'holes': [True, True, True, False, False, False, False, False, False]},   # Eb4 (same as D#4)
+            ('E', 0, 4): {'fingering': '1', 'holes': [True, True, False, False, False, False, False, False, False]},    # E4
+            ('F', 0, 4): {'fingering': '1 1', 'holes': [True, True, False, False, True, False, False, False, False]},   # F4 (cross fingering)
+            ('F', 1, 4): {'fingering': '123 12 LowC', 'holes': [True, True, True, True, True, True, False, False, False]},   # F#4 (fork fingering with right pinky low side key)
+            ('G', -1, 4): {'fingering': '123 12 LowC', 'holes': [True, True, True, True, True, True, False, False, False]},  # Gb4 (same as F#4)
+            ('G', 0, 4): {'fingering': 'T', 'holes': [True, False, False, False, False, False, False, False, False]},    # G4 (thumb only)
+            ('G', 1, 4): {'fingering': '23 123', 'holes': [True, False, True, True, True, True, True, False, False]},   # G#4 (Ab)
+            ('A', -1, 4): {'fingering': '23 123', 'holes': [True, False, True, True, True, True, True, False, False]}, # Ab4 (same as G#4)
+            ('A', 0, 4): {'fingering': '2 123', 'holes': [True, False, True, False, True, True, True, False, False]},  # A4
+            ('A', 1, 4): {'fingering': '2 12', 'holes': [True, False, True, False, True, True, False, False, False]},  # A#4 (Bb)
+            ('B', -1, 4): {'fingering': '2 12', 'holes': [True, False, True, False, True, True, False, False, False]}, # Bb4 (same as A#4)
+            ('B', 0, 4): {'fingering': '2', 'holes': [True, False, True, False, False, False, False, False, False]},   # B4
+            ('C', 0, 5): {'fingering': '2 1', 'holes': [True, False, True, False, True, False, False, False, False]},  # C5 (middle space)
+            
+            # Upper register - C#5 and above (requires octave key - should be transposed down)
+            ('C', 1, 5): {'fingering': 'Oct', 'holes': [True, False, False, False, False, False, False, False, True]},  # C#5 (octave key only)
+            ('D', -1, 5): {'fingering': 'Oct', 'holes': [True, False, False, False, False, False, False, False, True]}, # Db5 (same as C#5)
+            ('D', 0, 5): {'fingering': '123 123 Oct', 'holes': [True, True, True, True, True, True, True, False, True]}, # D5 (all fingers + octave)
+            ('D', 1, 5): {'fingering': '12 1 Oct', 'holes': [True, True, True, False, True, False, False, False, True]}, # D#5
+            ('E', -1, 5): {'fingering': '12 1 Oct', 'holes': [True, True, True, False, True, False, False, False, True]}, # Eb5 (same as D#5)
+            ('E', 0, 5): {'fingering': '12 12 Oct', 'holes': [True, True, True, False, True, True, False, False, True]}, # E5
+            ('F', 0, 5): {'fingering': '1 12 Oct', 'holes': [True, True, False, False, True, True, False, False, True]}, # F5
+            ('F', 1, 5): {'fingering': '1 2 Oct', 'holes': [True, True, False, True, False, False, False, False, True]}, # F#5
+            ('G', -1, 5): {'fingering': '1 2 Oct', 'holes': [True, True, False, True, False, False, False, False, True]}, # Gb5 (same as F#5)
+            ('G', 0, 5): {'fingering': 'Oct', 'holes': [True, False, False, False, False, False, False, False, True]}, # G5 (octave key only)
+            ('A', 0, 5): {'fingering': '2 123 Oct', 'holes': [True, False, True, False, True, True, True, False, True]}, # A5 
+            ('B', 0, 5): {'fingering': '2 Oct', 'holes': [True, False, True, False, False, False, False, False, True]}, # B5
+        }
+        
     def apply_downbeat_rules(self, content):
         """
         Apply downbeat simplification rules to MusicXML content.
@@ -252,6 +294,9 @@ class MusicXMLSimplifier:
             # Skip beam elements
             elif '<beam number=' in line:
                 continue
+            # Remove slur elements (since we're removing the paired eighth note that the slur connected to)
+            elif '<slur' in line and ('type="start"' in line or 'type="stop"' in line):
+                continue
             else:
                 converted_block.append(line)
         
@@ -294,6 +339,9 @@ class MusicXMLSimplifier:
                 continue
             # Skip beam elements
             elif '<beam number=' in line:
+                continue
+            # Remove slur elements that would span multiple notes (no longer needed for single half note)
+            elif '<slur' in line and ('type="start"' in line or 'type="stop"' in line):
                 continue
             else:
                 converted_block.append(line)
@@ -801,7 +849,7 @@ class MusicXMLSimplifier:
         self.multimeasure_rests_removed = multimeasure_rests_removed
         return content
     
-    def simplify_file(self, input_path, output_path, rules='downbeat', fix_rehearsal='measure_numbers', center_title=False, sync_part_names=None, auto_sync_part_names=False, source_instrument=None, clean_credits=True, remove_multimeasure_rests=False):
+    def simplify_file(self, input_path, output_path, rules='downbeat', fix_rehearsal='measure_numbers', center_title=False, sync_part_names=None, auto_sync_part_names=False, source_instrument=None, clean_credits=True, remove_multimeasure_rests=False, add_fingerings=False, fingering_style='numbers'):
         """
         Simplify a MusicXML file and save the result.
         
@@ -836,6 +884,13 @@ class MusicXMLSimplifier:
         # Transpose high notes for beginner accessibility
         print(f"\nTransposing high notes for beginners...")
         simplified_content = self.transpose_high_notes_for_beginners(simplified_content)
+        
+        # Add saxophone fingerings if requested (after transposition to match final pitches)
+        if add_fingerings and source_instrument == 'eb_alto_sax':
+            print(f"\nAdding saxophone fingerings...")
+            simplified_content = self.add_saxophone_fingerings(simplified_content, fingering_style)
+        elif add_fingerings and source_instrument != 'eb_alto_sax':
+            print(f"\nWarning: Fingering charts are only available for alto saxophone. Skipping fingerings for {source_instrument}.")
         
         # Fix rehearsal marks if requested
         if fix_rehearsal:
@@ -904,12 +959,12 @@ class MusicXMLSimplifier:
         """
         Transpose notes that are too high for beginner alto sax players.
         
-        For alto saxophone, the register break happens at G5. Notes G5 and above
+        For alto saxophone, the register break happens at D5. Notes D5 and above
         require the octave key and are challenging for beginners. This function
         transposes such notes down by one octave to make them more accessible.
         
-        Safe beginner range: Bb3 to F#5 (no octave key needed)
-        Advanced range: G5 and above (octave key required - transpose down)
+        Safe beginner range: Bb3 to C5 (no octave key needed)
+        Advanced range: D5 and above (octave key required - transpose down)
         """
         print("Transposing high notes for beginner accessibility...")
         
@@ -932,14 +987,15 @@ class MusicXMLSimplifier:
             octave = int(octave_match.group(1))
             alter = int(alter_match.group(1)) if alter_match else None
             
-            # Determine if note needs transposition (G5 and above)
+            # Determine if note needs transposition (C#5 and above)
+            # C5 is the highest note beginners should play without octave key
             needs_transposition = False
             if octave > 5:
                 needs_transposition = True
-            elif octave == 5 and step in ['G', 'A', 'B']:
+            elif octave == 5 and step in ['D', 'E', 'F', 'G', 'A', 'B']:
                 needs_transposition = True
-            elif octave == 5 and step == 'F' and alter == 1:  # F#5 is borderline, but okay
-                needs_transposition = False
+            elif octave == 5 and step == 'C' and alter == 1:  # C#5 should also be transposed
+                needs_transposition = True
             
             # Transpose if needed
             if needs_transposition:
@@ -963,6 +1019,179 @@ class MusicXMLSimplifier:
             print(f"  Transposed {notes_transposed} high notes down one octave for beginner accessibility")
         else:
             print(f"  No high notes found that needed transposition")
+        
+        return result_content
+    
+    def add_saxophone_fingerings(self, content, fingering_style="numbers"):
+        """
+        Add saxophone fingering notations to notes in MusicXML content.
+        Only adds fingerings for unfamiliar or challenging notes that beginners would need help with.
+        
+        Args:
+            content: MusicXML content string
+            fingering_style: "numbers" for simple fingering numbers, "holes" for hole diagrams, "both" for both
+        
+        Returns:
+            Modified MusicXML content with fingering notations added
+        """
+        print(f"Adding saxophone fingerings (style: {fingering_style})...")
+        
+        # Define which notes are familiar to beginners (don't need fingerings)
+        familiar_notes = {
+            # First register notes - familiar to beginners (no fingerings needed)
+            ('B', -1, 3),  # Bb3 - low Bb
+            ('B', 0, 3),   # B3 - low B  
+            ('C', 0, 4),   # C4 - low C
+            ('D', 0, 4),   # D4 - low D
+            ('E', 0, 4),   # E4 - low E
+            ('F', 0, 4),   # F4 - low F
+            ('G', 0, 4),   # G4 - low G (thumb only)
+            ('A', 0, 4),   # A4 - first note learned
+            ('B', 0, 4),   # B4 - second note learned  
+            ('C', 0, 5),   # C5 - middle space (LH finger 2 only)
+            # Only show fingerings for accidentals and difficult keys
+        }
+        
+        fingerings_added = 0
+        
+        def add_fingering_to_note(match):
+            nonlocal fingerings_added
+            
+            note_opening_tag = match.group(0)[:match.group(0).find('>')+1]  # Extract <note ...>
+            note_content = match.group(1)
+            
+            # Check if this note already has notations or fingerings
+            if '<technical>' in note_content and '<fingering>' in note_content:
+                return match.group(0)  # Skip if already has fingerings
+            
+            # Extract pitch information
+            pitch_match = re.search(r'<pitch>(.*?)</pitch>', note_content, re.DOTALL)
+            if not pitch_match:
+                return match.group(0)  # Skip if no pitch (rests, etc.)
+            
+            pitch_content = pitch_match.group(1)
+            
+            # Extract step, octave, and alter
+            step_match = re.search(r'<step>([A-G])</step>', pitch_content)
+            octave_match = re.search(r'<octave>(\d+)</octave>', pitch_content)
+            alter_match = re.search(r'<alter>([-]?\d+)</alter>', pitch_content)
+            
+            if not step_match or not octave_match:
+                return match.group(0)  # Skip if can't parse pitch
+            
+            step = step_match.group(1)
+            octave = int(octave_match.group(1))
+            alter = int(alter_match.group(1)) if alter_match else 0
+            
+            # Look up fingering in database
+            fingering_key = (step, alter, octave)
+            if fingering_key not in self.ALTO_SAX_FINGERINGS:
+                return match.group(0)  # Skip if no fingering available
+            
+            # Skip familiar notes that beginners already know
+            if fingering_key in familiar_notes:
+                return match.group(0)  # Skip fingering for familiar notes
+            
+            fingering_data = self.ALTO_SAX_FINGERINGS[fingering_key]
+            
+            # Build fingering notation XML
+            fingering_xml = ""
+            
+            if fingering_style in ["numbers", "both"]:
+                # Handle empty fingering strings (like G4 which is thumb-only)
+                fingering_text = fingering_data["fingering"] if fingering_data["fingering"] else "Th"
+                
+                # Split fingering into individual components for vertical stacking
+                if fingering_text == "Th":
+                    fingering_xml += f'        <fingering>T</fingering>\n'
+                else:
+                    # Split on spaces to separate left hand, right hand, and special keys
+                    parts = fingering_text.split()
+                    
+                    # Collect all fingering elements first, then reverse for bottom-to-top display
+                    fingering_elements = []
+                    
+                    # Process in order: left hand first, then right hand, then special keys
+                    for part_idx, part in enumerate(parts):
+                        if part == "Oct":
+                            fingering_elements.append('8va')
+                        elif part == "LowC":
+                            fingering_elements.append('C')
+                        else:
+                            # Split into individual digits and characters
+                            for char in part:
+                                if char.isdigit():
+                                    fingering_elements.append(char)
+                                elif char == 'C':
+                                    # C key (low Bb)
+                                    fingering_elements.append('C')
+                    
+                    # Reverse the order so they display top-to-bottom in music notation software
+                    fingering_elements.reverse()
+                    
+                    # Add to XML in reversed order
+                    for element in fingering_elements:
+                        fingering_xml += f'        <fingering>{element}</fingering>\n'
+            
+            if fingering_style in ["holes", "both"]:
+                # Add proper MusicXML hole elements for woodwind fingering
+                hole_names = ["LH-Thumb", "LH-1", "LH-2", "LH-3", "RH-1", "RH-2", "RH-3", "RH-4", "Octave-Key"]
+                
+                for i, (hole_name, is_closed) in enumerate(zip(hole_names, fingering_data["holes"])):
+                    fingering_xml += f'        <hole>\n'
+                    fingering_xml += f'          <hole-closed>{"yes" if is_closed else "no"}</hole-closed>\n'
+                    fingering_xml += f'          <hole-shape>circle</hole-shape>\n'
+                    fingering_xml += f'        </hole>\n'
+            
+            # Check if note already has notations section
+            if '<notations>' in note_content:
+                # Add to existing notations
+                if '<technical>' in note_content:
+                    # Add to existing technical section
+                    technical_insertion = re.sub(
+                        r'(<technical[^>]*>)',
+                        r'\1\n' + fingering_xml,
+                        note_content
+                    )
+                else:
+                    # Add new technical section to existing notations
+                    technical_section = f'      <technical>\n{fingering_xml}      </technical>\n'
+                    technical_insertion = re.sub(
+                        r'(<notations[^>]*>)',
+                        r'\1\n' + technical_section,
+                        note_content
+                    )
+            else:
+                # Create new notations section
+                technical_section = f'      <technical>\n{fingering_xml}      </technical>'
+                notations_section = f'    <notations>\n{technical_section}\n    </notations>'
+                
+                # Insert before closing </note> tag
+                technical_insertion = re.sub(
+                    r'(.*)(  </note>)',
+                    r'\1' + notations_section + r'\n\2',
+                    note_content,
+                    flags=re.DOTALL
+                )
+            
+            fingerings_added += 1
+            
+            # Create note name for logging
+            alter_str = "#" if alter == 1 else "b" if alter == -1 else ""
+            note_name = f"{step}{alter_str}{octave}"
+            fingering_display = fingering_data["fingering"] if fingering_data["fingering"] else "Th"
+            
+            print(f"  Added fingering for {note_name}: {fingering_display}")
+            
+            return f'{note_opening_tag}{technical_insertion}</note>'
+        
+        # Use regex to find and process all note blocks with pitches
+        result_content = re.sub(r'<note[^>]*>(.*?)</note>', add_fingering_to_note, content, flags=re.DOTALL)
+        
+        if fingerings_added > 0:
+            print(f"  Added fingerings to {fingerings_added} notes")
+        else:
+            print(f"  No applicable notes found for fingering notation")
         
         return result_content
     
@@ -1127,6 +1356,11 @@ def main():
                        help='Convert multi-measure rests into individual measure rests for easier counting')
     parser.add_argument('--verbose', '-v', action='store_true',
                        help='Print detailed progress information')
+    parser.add_argument('--add-fingerings', action='store_true',
+                       help='Add saxophone fingering notations to notes (only for alto sax)')
+    parser.add_argument('--fingering-style', default='numbers',
+                       choices=['numbers', 'holes', 'both'],
+                       help='Style of fingering notation: numbers (simple), holes (diagram), or both')
     
     args = parser.parse_args()
     
@@ -1163,7 +1397,7 @@ def main():
     
     rehearsal_mode = None if args.rehearsal == 'none' else args.rehearsal
     clean_credits = not args.no_clean_credits  # Clean credits by default, disable with --no-clean-credits
-    success = simplifier.simplify_file(args.input, args.output, args.rules, rehearsal_mode, args.center_title, args.sync_part_names, args.auto_sync_part_names, source_instrument, clean_credits, args.remove_multimeasure_rests)
+    success = simplifier.simplify_file(args.input, args.output, args.rules, rehearsal_mode, args.center_title, args.sync_part_names, args.auto_sync_part_names, source_instrument, clean_credits, args.remove_multimeasure_rests, args.add_fingerings, args.fingering_style)
     
     if success:
         print("SUCCESS: Simplification completed successfully!")
