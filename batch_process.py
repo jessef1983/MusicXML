@@ -116,13 +116,25 @@ def process_file(input_path, output_path, args):
     print(f"   -> Output: {output_path.name}")
     
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode == 0:
-            print(f"   ✅ Success!")
-            return True
+        if args.verbose:
+            # Show all output when verbose is enabled
+            print(f"   📝 Command: {' '.join(cmd)}")
+            result = subprocess.run(cmd, text=True)
+            if result.returncode == 0:
+                print(f"   ✅ Success!")
+                return True
+            else:
+                print(f"   ❌ Failed with return code: {result.returncode}")
+                return False
         else:
-            print(f"   ❌ Failed: {result.stderr}")
-            return False
+            # Capture output when not verbose
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                print(f"   ✅ Success!")
+                return True
+            else:
+                print(f"   ❌ Failed: {result.stderr}")
+                return False
     except Exception as e:
         print(f"   ❌ Error: {e}")
         return False

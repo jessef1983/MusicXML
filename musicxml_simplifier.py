@@ -277,13 +277,15 @@ class MusicXMLSimplifier:
     def _convert_to_half_note(self, dotted_quarter_block):
         """Convert a dotted quarter note block to a half note block."""
         converted_block = []
+        duration_changed = False
         
         for line in dotted_quarter_block:
             # Convert duration from 3 (dotted quarter) to 4 (half note)
             if '<duration>3</duration>' in line:
                 converted_block.append(line.replace('<duration>3</duration>', '<duration>4</duration>'))
-            # Convert type from quarter to half
-            elif '<type>quarter</type>' in line:
+                duration_changed = True
+            # Convert type from quarter to half ONLY if we changed duration=3 to 4
+            elif '<type>quarter</type>' in line and duration_changed:
                 converted_block.append(line.replace('<type>quarter</type>', '<type>half</type>'))
             # Remove dot element (handles both <dot/> and <dot .../>)
             elif '<dot' in line and '/>' in line:
@@ -593,12 +595,19 @@ class MusicXMLSimplifier:
         content = re.sub(credit_pattern, replace_credit_part_name, content)
         
         # 3. Update part definition (part-name in score-part)
-        part_def_pattern = r'(<part-name>)[^<]*(</part-name>)'
+        part_def_pattern = r'(<part-name[^>]*>)[^<]*(</part-name>)'
         
         def replace_part_definition(match):
             opening_tag = match.group(1) 
             closing_tag = match.group(2)
-            print(f"    Part definition: updated to '{new_part_name}'")
+            
+            # Remove print-object="no" to make part name visible, or set it to "yes"
+            if 'print-object="no"' in opening_tag:
+                opening_tag = opening_tag.replace('print-object="no"', 'print-object="yes"')
+                print(f"    Part definition: updated to '{new_part_name}' and made visible")
+            else:
+                print(f"    Part definition: updated to '{new_part_name}'")
+            
             return opening_tag + new_part_name + closing_tag
         
         content = re.sub(part_def_pattern, replace_part_definition, content)
@@ -611,8 +620,9 @@ class MusicXMLSimplifier:
         
         1. Joins lines within individual credit-words elements
         2. Consolidates multiple credit-words elements in the same credit block  
-        3. Replaces problematic characters that can cause truncation in MuseScore
-        4. Normalizes whitespace
+        3. Removes duplicate credit blocks with identical text content
+        4. Replaces problematic characters that can cause truncation in MuseScore
+        5. Normalizes whitespace
         
         MuseScore and many other notation programs can truncate credit text when they
         encounter certain special characters or XML entities. This function ensures
@@ -621,7 +631,25 @@ class MusicXMLSimplifier:
         
         print("Cleaning up credit text formatting...")
         
-        # First, clean up individual credit-words elements (join internal newlines)
+        # First, remove duplicate credit blocks with identical text content
+        seen_credit_texts = set()
+        def remove_duplicate_credit_blocks(match):
+            credit_content = match.group(2)
+            # Extract just the text content from credit-words
+            text_match = re.search(r'<credit-words[^>]*>([^<]*)</credit-words>', credit_content)
+            if text_match:
+                credit_text = text_match.group(1).strip()
+                if credit_text in seen_credit_texts:
+                    print(f"  Removing duplicate credit block: '{credit_text}'")
+                    return ''  # Remove duplicate
+                seen_credit_texts.add(credit_text)
+            return match.group(0)  # Keep the first occurrence
+        
+        # Apply duplicate removal to entire credit blocks
+        credit_block_pattern = r'(<credit[^>]*>)(.*?)(</credit>)'
+        content = re.sub(credit_block_pattern, remove_duplicate_credit_blocks, content, flags=re.DOTALL)
+        
+        # Second, clean up individual credit-words elements (join internal newlines)
         credit_pattern = r'(<credit-words[^>]*>)(.*?)(</credit-words>)'
         
         def clean_credit_content(match):
@@ -834,6 +862,10 @@ class MusicXMLSimplifier:
             simplified_content = self.correct_instrument_metadata(simplified_content, source_instrument)
             self.rules_applied.append(f'instrument_correction_{source_instrument}')
         
+        # Add title from filename if missing (before credit cleaning to avoid duplication)
+        print(f"\nAdding title from filename...")
+        simplified_content = self.add_title_from_filename(simplified_content, input_path)
+        
         # Clean up credit text formatting if requested
         if clean_credits:
             print(f"\nCleaning credit text...")
@@ -861,6 +893,63 @@ class MusicXMLSimplifier:
             return False
         
         return True
+    
+    def add_title_from_filename(self, content, input_path):
+        """Add a main title credit extracted from the filename if no title exists."""
+        from pathlib import Path
+        
+        # Extract filename and clean it up
+        filename = Path(input_path).stem  # Gets filename without extension
+        
+        # Remove common prefixes/suffixes and clean up the title
+        title = filename
+        
+        # Remove leading numbers and dots (e.g., "3. " from "3. Driving Home for Christmas Part 2 Sax")
+        title = re.sub(r'^\d+\.\s*', '', title)
+        
+        # Remove part/instrument info at the end (e.g., "Part 2 Sax", "Part 3 Alto Sax Eb")
+        title = re.sub(r'\s+Part\s+\d+.*$', '', title, flags=re.IGNORECASE)
+        
+        # Remove standalone instrument names at the end
+        title = re.sub(r'\s+(Sax|Saxophone|Trumpet|Clarinet|Horn|Flute|Piano)(\s+\w+)*$', '', title, flags=re.IGNORECASE)
+        
+        # Clean up any extra whitespace
+        title = title.strip()
+        
+        if not title:
+            return content  # Don't add empty title
+            
+        # Check if a main title already exists by looking for key words from the title
+        title_words = title.upper().split()
+        # Check if the majority of title words are already present in existing credits
+        existing_credits = re.findall(r'<credit-words[^>]*>([^<]+)</credit-words>', content)
+        for credit_text in existing_credits:
+            credit_upper = credit_text.upper()
+            matching_words = sum(1 for word in title_words if word in credit_upper)
+            # If most of the title words are found in an existing credit, skip adding
+            if matching_words >= len(title_words) * 0.7:  # 70% match threshold
+                print(f"  Main title '{title}' similar to existing credit '{credit_text.strip()}', skipping")
+                return content
+            
+        # Find the first credit element to insert before it
+        first_credit_match = re.search(r'(\s*)<credit page="1">', content)
+        if not first_credit_match:
+            print(f"  No credits section found, cannot add title")
+            return content
+            
+        indent = first_credit_match.group(1)  # Preserve indentation
+        
+        # Create the title credit matching Last Christmas formatting (centered, default font)
+        title_credit = f'''{indent}<credit page="1">
+{indent}  <credit-words default-x="616.9354838709677" default-y="1357.258064516129" justify="center" valign="top">{title.upper()}</credit-words>
+{indent}  </credit>
+{indent}'''
+        
+        # Insert the title credit before the first existing credit
+        content = content.replace(first_credit_match.group(0), title_credit + first_credit_match.group(0))
+        
+        print(f"  Added main title: '{title}'")
+        return content
     
     def _update_metadata(self, content):
         """Update the file metadata to indicate it's been simplified."""
