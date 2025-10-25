@@ -10,6 +10,8 @@ Date: 2025-10-23
 """
 
 import re
+
+import re
 import sys
 import argparse
 from pathlib import Path
@@ -831,6 +833,10 @@ class MusicXMLSimplifier:
             print(f"Unknown rule set: {rules}")
             return False
         
+        # Transpose high notes for beginner accessibility
+        print(f"\nTransposing high notes for beginners...")
+        simplified_content = self.transpose_high_notes_for_beginners(simplified_content)
+        
         # Fix rehearsal marks if requested
         if fix_rehearsal:
             print(f"\nFixing rehearsal marks (mode: {fix_rehearsal})...")
@@ -893,6 +899,72 @@ class MusicXMLSimplifier:
             return False
         
         return True
+    
+    def transpose_high_notes_for_beginners(self, content):
+        """
+        Transpose notes that are too high for beginner alto sax players.
+        
+        For alto saxophone, the register break happens at G5. Notes G5 and above
+        require the octave key and are challenging for beginners. This function
+        transposes such notes down by one octave to make them more accessible.
+        
+        Safe beginner range: Bb3 to F#5 (no octave key needed)
+        Advanced range: G5 and above (octave key required - transpose down)
+        """
+        print("Transposing high notes for beginner accessibility...")
+        
+        notes_transposed = 0
+        
+        def transpose_pitch_block(match):
+            nonlocal notes_transposed
+            
+            pitch_content = match.group(1)
+            
+            # Extract step, octave, and alter using regex
+            step_match = re.search(r'<step>([A-G])</step>', pitch_content)
+            octave_match = re.search(r'<octave>(\d+)</octave>', pitch_content)
+            alter_match = re.search(r'<alter>([-]?\d+)</alter>', pitch_content)
+            
+            if not step_match or not octave_match:
+                return match.group(0)  # Return unchanged if we can't parse
+            
+            step = step_match.group(1)
+            octave = int(octave_match.group(1))
+            alter = int(alter_match.group(1)) if alter_match else None
+            
+            # Determine if note needs transposition (G5 and above)
+            needs_transposition = False
+            if octave > 5:
+                needs_transposition = True
+            elif octave == 5 and step in ['G', 'A', 'B']:
+                needs_transposition = True
+            elif octave == 5 and step == 'F' and alter == 1:  # F#5 is borderline, but okay
+                needs_transposition = False
+            
+            # Transpose if needed
+            if needs_transposition:
+                new_octave = octave - 1
+                notes_transposed += 1
+                
+                # Replace the octave value in the pitch content
+                new_pitch_content = re.sub(r'<octave>\d+</octave>', f'<octave>{new_octave}</octave>', pitch_content)
+                
+                alter_str = f"#{alter}" if alter == 1 else f"b{-alter}" if alter == -1 else ""
+                print(f"  Transposed {step}{alter_str}{octave} -> {step}{alter_str}{new_octave}")
+                
+                return f'<pitch>{new_pitch_content}</pitch>'
+            else:
+                return match.group(0)  # Return unchanged
+        
+        # Use regex to find and process all pitch blocks
+        result_content = re.sub(r'<pitch>(.*?)</pitch>', transpose_pitch_block, content, flags=re.DOTALL)
+        
+        if notes_transposed > 0:
+            print(f"  Transposed {notes_transposed} high notes down one octave for beginner accessibility")
+        else:
+            print(f"  No high notes found that needed transposition")
+        
+        return result_content
     
     def add_title_from_filename(self, content, input_path):
         """Add a main title credit extracted from the filename if no title exists."""
