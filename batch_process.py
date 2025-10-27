@@ -118,6 +118,8 @@ def process_file(input_path, output_path, args):
         cmd.append("--skip-rhythm-simplification")
     if args.add_courtesy_accidentals:
         cmd.append("--add-courtesy-accidentals")
+    if args.add_courtesy_fingerings:
+        cmd.append("--add-courtesy-fingerings")
     
     print(f"🔄 Processing: {input_path.name}")
     print(f"   -> Output: {output_path.name}")
@@ -188,6 +190,8 @@ def main():
                        help='Skip rhythm simplification and high note transposition, only apply OMR corrections (instrument metadata, titles, credits, part sync)')
     parser.add_argument('--add-courtesy-accidentals', action='store_true',
                        help='Add courtesy accidentals after bar lines and octave changes for clarity')
+    parser.add_argument('--add-courtesy-fingerings', action='store_true',
+                       help='Add trumpet fingerings to all accidental notes (works with courtesy accidentals)')
     
     args = parser.parse_args()
     

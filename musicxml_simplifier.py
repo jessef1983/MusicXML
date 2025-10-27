@@ -29,6 +29,7 @@ class MusicXMLSimplifier:
         self.rehearsal_marks_fixed = 0
         self.multimeasure_rests_removed = 0
         self.courtesy_accidentals_added = 0
+        self.trumpet_fingerings_added = 0
         
         # Instrument correction definitions
         self.INSTRUMENT_CORRECTIONS = {
@@ -122,6 +123,54 @@ class MusicXMLSimplifier:
             ('G', 0, 5): {'fingering': 'Oct', 'holes': [True, False, False, False, False, False, False, False, True]}, # G5 (octave key only)
             ('A', 0, 5): {'fingering': '2 123 Oct', 'holes': [True, False, True, False, True, True, True, False, True]}, # A5 
             ('B', 0, 5): {'fingering': '2 Oct', 'holes': [True, False, True, False, False, False, False, False, True]}, # B5
+        }
+        
+        # Bb Trumpet Fingering Chart Database
+        # Key: (step, alter, octave) - Value: {'fingering': str, 'valves': [bool, bool, bool]}
+        # Valves represent: [Valve-1, Valve-2, Valve-3] - True = pressed, False = open
+        # Bb trumpet written pitch (sounds a whole step lower in concert pitch)
+        self.BB_TRUMPET_FINGERINGS = {
+            # Low register - written F#3 (concert E3) to written C5 (concert Bb4)
+            ('F', 1, 3): {'fingering': '2', 'valves': [False, True, False]},    # F#3 (written, sounds E3)
+            ('G', 0, 3): {'fingering': '0', 'valves': [False, False, False]},   # G3 (written, sounds F3) - open
+            ('G', 1, 3): {'fingering': '23', 'valves': [False, True, True]},    # G#3 (written, sounds F#3)
+            ('A', -1, 3): {'fingering': '23', 'valves': [False, True, True]},   # Ab3 (same as G#3)
+            ('A', 0, 3): {'fingering': '12', 'valves': [True, True, False]},    # A3 (written, sounds G3)
+            ('A', 1, 3): {'fingering': '1', 'valves': [True, False, False]},    # A#3 (written, sounds G#3)
+            ('B', -1, 3): {'fingering': '1', 'valves': [True, False, False]},   # Bb3 (same as A#3)
+            ('B', 0, 3): {'fingering': '2', 'valves': [False, True, False]},    # B3 (written, sounds A3)
+            
+            # Middle register - written C4 to written C5 (most common range)
+            ('C', 0, 4): {'fingering': '0', 'valves': [False, False, False]},   # C4 (written, sounds Bb3) - open
+            ('C', 1, 4): {'fingering': '23', 'valves': [False, True, True]},    # C#4 (written, sounds B3)
+            ('D', -1, 4): {'fingering': '23', 'valves': [False, True, True]},   # Db4 (same as C#4)
+            ('D', 0, 4): {'fingering': '13', 'valves': [True, False, True]},    # D4 (written, sounds C4)
+            ('D', 1, 4): {'fingering': '2', 'valves': [False, True, False]},    # D#4 (written, sounds C#4)
+            ('E', -1, 4): {'fingering': '2', 'valves': [False, True, False]},   # Eb4 (same as D#4)
+            ('E', 0, 4): {'fingering': '12', 'valves': [True, True, False]},    # E4 (written, sounds D4)
+            ('F', 0, 4): {'fingering': '1', 'valves': [True, False, False]},    # F4 (written, sounds Eb4)
+            ('F', 1, 4): {'fingering': '2', 'valves': [False, True, False]},    # F#4 (written, sounds E4)
+            ('G', -1, 4): {'fingering': '2', 'valves': [False, True, False]},   # Gb4 (same as F#4)
+            ('G', 0, 4): {'fingering': '0', 'valves': [False, False, False]},   # G4 (written, sounds F4) - open
+            ('G', 1, 4): {'fingering': '23', 'valves': [False, True, True]},    # G#4 (written, sounds F#4)
+            ('A', -1, 4): {'fingering': '23', 'valves': [False, True, True]},   # Ab4 (same as G#4)
+            ('A', 0, 4): {'fingering': '12', 'valves': [True, True, False]},    # A4 (written, sounds G4)
+            ('A', 1, 4): {'fingering': '1', 'valves': [True, False, False]},    # A#4 (written, sounds G#4)
+            ('B', -1, 4): {'fingering': '1', 'valves': [True, False, False]},   # Bb4 (same as A#4)
+            ('B', 0, 4): {'fingering': '2', 'valves': [False, True, False]},    # B4 (written, sounds A4)
+            ('C', 0, 5): {'fingering': '0', 'valves': [False, False, False]},   # C5 (written, sounds Bb4) - open
+            
+            # Upper register - written C#5 and above (for advanced players)
+            ('C', 1, 5): {'fingering': '23', 'valves': [False, True, True]},    # C#5 (written, sounds B4)
+            ('D', -1, 5): {'fingering': '23', 'valves': [False, True, True]},   # Db5 (same as C#5)
+            ('D', 0, 5): {'fingering': '13', 'valves': [True, False, True]},    # D5 (written, sounds C5)
+            ('D', 1, 5): {'fingering': '2', 'valves': [False, True, False]},    # D#5 (written, sounds C#5)
+            ('E', -1, 5): {'fingering': '2', 'valves': [False, True, False]},   # Eb5 (same as D#5)
+            ('E', 0, 5): {'fingering': '12', 'valves': [True, True, False]},    # E5 (written, sounds D5)
+            ('F', 0, 5): {'fingering': '1', 'valves': [True, False, False]},    # F5 (written, sounds Eb5)
+            ('F', 1, 5): {'fingering': '2', 'valves': [False, True, False]},    # F#5 (written, sounds E5)
+            ('G', -1, 5): {'fingering': '2', 'valves': [False, True, False]},   # Gb5 (same as F#5)
+            ('G', 0, 5): {'fingering': '0', 'valves': [False, False, False]},   # G5 (written, sounds F5) - open
         }
         
     def apply_downbeat_rules(self, content):
@@ -1149,7 +1198,115 @@ class MusicXMLSimplifier:
         self.courtesy_accidentals_added = accidentals_added
         return content
     
-    def simplify_file(self, input_path, output_path, rules='downbeat', fix_rehearsal='measure_numbers', center_title=False, sync_part_names=None, auto_sync_part_names=False, source_instrument=None, clean_credits=True, remove_multimeasure_rests=False, add_fingerings=False, fingering_style='numbers', skip_rhythm_simplification=False, add_courtesy_accidentals=False):
+    def add_trumpet_fingerings_to_accidentals(self, content):
+        """
+        Add trumpet fingerings to ALL notes with accidentals (written and courtesy).
+        
+        This helps trumpet students by showing valve combinations for any sharp, flat, 
+        or natural that appears in the music, including courtesy accidentals.
+        
+        Args:
+            content: MusicXML content string
+            
+        Returns:
+            Modified content with trumpet fingerings added to accidental notes
+        """
+        fingerings_added = 0
+        
+        print("  Adding trumpet fingerings to all accidental notes...")
+        
+        # Find all notes with accidentals (both written and courtesy)
+        note_pattern = r'<note[^>]*>(.*?)</note>'
+        
+        def add_trumpet_fingering_to_note(match):
+            nonlocal fingerings_added
+            note_content = match.group(1)
+            
+            # Check if this note already has fingerings
+            if '<fingering>' in note_content:
+                return match.group(0)  # Skip if already has fingering
+            
+            # Check for accidental marking (both written and courtesy)
+            accidental_match = re.search(r'<accidental[^>]*>([^<]+)</accidental>', note_content)
+            
+            # Only add fingerings to notes that have VISIBLE accidentals
+            # This includes both written accidentals and courtesy accidentals
+            if not accidental_match:
+                return match.group(0)  # No visible accidental, no fingering needed
+            
+            pitch_match = re.search(r'<pitch>(.*?)</pitch>', note_content, re.DOTALL)
+            if not pitch_match:
+                return match.group(0)  # No pitch (rest, etc.)
+            
+            pitch_content = pitch_match.group(1)
+            
+            # Extract step, octave, and alter
+            step_match = re.search(r'<step>([A-G])</step>', pitch_content)
+            octave_match = re.search(r'<octave>(\d+)</octave>', pitch_content)
+            alter_match = re.search(r'<alter>([-]?\d+)</alter>', pitch_content)
+            
+            if not step_match or not octave_match:
+                return match.group(0)
+            
+            step = step_match.group(1)
+            octave = int(octave_match.group(1))
+            alter = int(alter_match.group(1)) if alter_match else 0
+            
+            # Look up trumpet fingering
+            fingering_key = (step, alter, octave)
+            if fingering_key in self.BB_TRUMPET_FINGERINGS:
+                fingering_info = self.BB_TRUMPET_FINGERINGS[fingering_key]
+                fingering_text = fingering_info['fingering']
+                
+                # Create technical notation for trumpet fingering
+                technical_notation = f'''        <notations>
+          <technical>
+            <fingering placement="above">{fingering_text}</fingering>
+          </technical>
+        </notations>'''
+                
+                # Find where to insert fingering (after </pitch> but before any existing notations)
+                pitch_end = note_content.find('</pitch>')
+                if pitch_end != -1:
+                    insertion_point = pitch_end + len('</pitch>')
+                    
+                    # Check if there are already notations - if so, merge with them
+                    notations_match = re.search(r'(\s*)<notations>(.*?)</notations>', note_content[insertion_point:], re.DOTALL)
+                    if notations_match:
+                        # Add to existing notations
+                        existing_notations = notations_match.group(2)
+                        new_fingering = f'''          <technical>
+            <fingering placement="above">{fingering_text}</fingering>
+          </technical>'''
+                        
+                        updated_notations = f'''{notations_match.group(1)}<notations>{existing_notations}{new_fingering}
+        </notations>'''
+                        
+                        new_note_content = (note_content[:insertion_point] + 
+                                          re.sub(r'\s*<notations>.*?</notations>', updated_notations, 
+                                               note_content[insertion_point:], flags=re.DOTALL))
+                    else:
+                        # Insert new notations
+                        new_note_content = (note_content[:insertion_point] + 
+                                          '\n' + technical_notation + 
+                                          note_content[insertion_point:])
+                    
+                    fingerings_added += 1
+                    return f'<note>{new_note_content}</note>'
+            else:
+                # Note is outside normal trumpet range or not in fingering chart
+                return match.group(0)
+            
+            return match.group(0)
+        
+        # Apply fingerings to all notes with accidentals
+        content = re.sub(note_pattern, add_trumpet_fingering_to_note, content, flags=re.DOTALL)
+        
+        print(f"  Added {fingerings_added} trumpet fingerings to accidental notes")
+        self.trumpet_fingerings_added = fingerings_added
+        return content
+    
+    def simplify_file(self, input_path, output_path, rules='downbeat', fix_rehearsal='measure_numbers', center_title=False, sync_part_names=None, auto_sync_part_names=False, source_instrument=None, clean_credits=True, remove_multimeasure_rests=False, add_fingerings=False, fingering_style='numbers', skip_rhythm_simplification=False, add_courtesy_accidentals=False, add_courtesy_fingerings=False):
         """
         Simplify a MusicXML file and save the result.
         
@@ -1254,6 +1411,11 @@ class MusicXMLSimplifier:
         if add_courtesy_accidentals:
             print(f"\nAdding courtesy accidentals...")
             simplified_content = self.add_courtesy_accidentals(simplified_content)
+        
+        # Add courtesy fingerings if requested (for trumpet parts)
+        if add_courtesy_fingerings and source_instrument == 'bb_trumpet':
+            print(f"\nAdding courtesy fingerings...")
+            simplified_content = self.add_trumpet_fingerings_to_accidentals(simplified_content)
         
         # Update title/metadata to indicate processing type
         # Only auto-update part name if we're not using custom part names or auto-sync
@@ -1632,6 +1794,7 @@ class MusicXMLSimplifier:
         print(f"Rehearsal marks fixed: {self.rehearsal_marks_fixed}")
         print(f"Multi-measure rests removed: {self.multimeasure_rests_removed}")
         print(f"Courtesy accidentals added: {self.courtesy_accidentals_added}")
+        print(f"Courtesy fingerings added: {self.trumpet_fingerings_added}")
         print(f"Rules applied: {', '.join(self.rules_applied)}")
         print("=== End Summary ===\n")
 
@@ -1714,6 +1877,8 @@ def main():
                        help='Skip rhythm simplification and high note transposition, only apply OMR corrections (instrument metadata, titles, credits, part sync)')
     parser.add_argument('--add-courtesy-accidentals', action='store_true',
                        help='Add courtesy accidentals after bar lines and octave changes for clarity')
+    parser.add_argument('--add-courtesy-fingerings', action='store_true',
+                       help='Add trumpet fingerings to all accidental notes (works with courtesy accidentals)')
     
     args = parser.parse_args()
     
@@ -1750,7 +1915,7 @@ def main():
     
     rehearsal_mode = None if args.rehearsal == 'none' else args.rehearsal
     clean_credits = not args.no_clean_credits  # Clean credits by default, disable with --no-clean-credits
-    success = simplifier.simplify_file(args.input, args.output, args.rules, rehearsal_mode, args.center_title, args.sync_part_names, args.auto_sync_part_names, source_instrument, clean_credits, args.remove_multimeasure_rests, args.add_fingerings, args.fingering_style, args.skip_rhythm_simplification, args.add_courtesy_accidentals)
+    success = simplifier.simplify_file(args.input, args.output, args.rules, rehearsal_mode, args.center_title, args.sync_part_names, args.auto_sync_part_names, source_instrument, clean_credits, args.remove_multimeasure_rests, args.add_fingerings, args.fingering_style, args.skip_rhythm_simplification, args.add_courtesy_accidentals, args.add_courtesy_fingerings)
     
     if success:
         print("SUCCESS: Simplification completed successfully!")
