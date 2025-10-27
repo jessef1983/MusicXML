@@ -191,7 +191,7 @@ def main():
     parser.add_argument('--add-courtesy-accidentals', action='store_true',
                        help='Add courtesy accidentals after bar lines and octave changes for clarity')
     parser.add_argument('--add-courtesy-fingerings', action='store_true',
-                       help='Add trumpet fingerings to all accidental notes (works with courtesy accidentals)')
+                       help='Add brass fingerings to all accidental notes (trumpet and horn supported)')
     
     args = parser.parse_args()
     
