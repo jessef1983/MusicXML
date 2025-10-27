@@ -33,13 +33,15 @@ class MusicXMLSimplifier:
         self.INSTRUMENT_CORRECTIONS = {
             'bb_trumpet': {
                 'name': 'Trumpet',
-                'transpose_chromatic': -2,  # Down a major 2nd (matches working Last Christmas file)
-                'transpose_diatonic': -1,
+                'part_name': 'Trumpet in Bb',  # Proper part name with transposition info
+                'transpose_chromatic': -2,  # Written to concert: written C -> concert Bb (DOWN 2 semitones)
+                'transpose_diatonic': -1,   # Written to concert: written C -> concert Bb (DOWN 1 diatonic step)
                 'instrument_sound': 'brass.trumpet.bflat',
                 'midi_program': 57  # Trumpet
             },
             'concert_pitch': {
                 'name': 'Concert Pitch',
+                'part_name': 'Concert Pitch',
                 'transpose_chromatic': 0,   # No transposition
                 'transpose_diatonic': 0,
                 'instrument_sound': 'keyboard.piano',
@@ -47,6 +49,7 @@ class MusicXMLSimplifier:
             },
             'flute': {
                 'name': 'Flute',
+                'part_name': 'Flute',
                 'transpose_chromatic': 0,   # No transposition (concert pitch)
                 'transpose_diatonic': 0,
                 'instrument_sound': 'wind.flutes.flute',
@@ -54,22 +57,25 @@ class MusicXMLSimplifier:
             },
             'eb_alto_sax': {
                 'name': 'Alto Saxophone',
-                'transpose_chromatic': -9,  # Down a major 6th (Eb instrument)
-                'transpose_diatonic': -5,
+                'part_name': 'Alto Saxophone in Eb',
+                'transpose_chromatic': -9,  # Written to concert: written C -> concert Eb (DOWN 9 semitones = major 6th)
+                'transpose_diatonic': -5,   # Written to concert: DOWN 5 diatonic steps
                 'instrument_sound': 'reed.saxophone.alto',
                 'midi_program': 66  # Alto Sax
             },
             'f_horn': {
                 'name': 'Horn',
-                'transpose_chromatic': -7,  # Down a perfect 5th (F instrument)
-                'transpose_diatonic': -4,
+                'part_name': 'Horn in F',
+                'transpose_chromatic': -7,  # Written to concert: written C -> concert F (DOWN 7 semitones = perfect 5th)
+                'transpose_diatonic': -4,   # Written to concert: DOWN 4 diatonic steps
                 'instrument_sound': 'brass.french-horn',
                 'midi_program': 61  # French Horn
             },
             'bb_clarinet': {
                 'name': 'Clarinet',
-                'transpose_chromatic': -2,  # Down a major 2nd (same as Bb trumpet)
-                'transpose_diatonic': -1,
+                'part_name': 'Clarinet in Bb',
+                'transpose_chromatic': -2,  # Written to concert: written C -> concert Bb (DOWN 2 semitones)
+                'transpose_diatonic': -1,   # Written to concert: DOWN 1 diatonic step
                 'instrument_sound': 'wind.reed.clarinet.bflat',
                 'midi_program': 72  # Clarinet
             }
@@ -471,7 +477,7 @@ class MusicXMLSimplifier:
         
         return content
     
-    def correct_instrument_metadata(self, content, instrument_key):
+    def correct_instrument_metadata(self, content, instrument_key, update_part_names=False):
         """
         Correct instrument metadata to match the specified source instrument.
         Fixes transposition, instrument sound, and MIDI program settings.
@@ -479,6 +485,7 @@ class MusicXMLSimplifier:
         Args:
             content: MusicXML content as string
             instrument_key: Key from INSTRUMENT_CORRECTIONS dict
+            update_part_names: Whether to also update part names to match instrument
         """
         if instrument_key not in self.INSTRUMENT_CORRECTIONS:
             print(f"  Warning: Unknown instrument '{instrument_key}', skipping correction")
@@ -543,7 +550,78 @@ class MusicXMLSimplifier:
             content = re.sub(program_pattern, replacement, content)
             print(f"    Updated MIDI program: {correction['midi_program']}")
         
+        # Convert written key signature to concert key signature
+        if correction['transpose_chromatic'] != 0:
+            content = self.convert_to_concert_key_signature(content, correction['transpose_chromatic'])
+        
+        # Update part names if requested
+        if update_part_names:
+            print(f"    Updating part names to match corrected instrument...")
+            part_name_to_use = correction.get('part_name', correction['name'])
+            content = self.sync_part_names(content, part_name_to_use)
+        
         return content
+    
+    def convert_to_concert_key_signature(self, content, transpose_chromatic):
+        """
+        Preserve written key signature for musicians while ensuring proper transpose element.
+        
+        The <key><fifths> should show the WRITTEN key (what musician reads on staff).
+        The <transpose> element tells software how to convert to concert pitch.
+        
+        Args:
+            content: MusicXML content as string
+            transpose_chromatic: Chromatic transposition in semitones (negative = down)
+            
+        Returns:
+            str: Content with preserved written key signature
+        """
+        # Find existing key signature
+        key_match = re.search(r'<key>\s*<fifths>([^<]+)</fifths>\s*</key>', content)
+        if not key_match:
+            print("    No key signature found")
+            return content
+            
+        written_fifths = int(key_match.group(1))
+        written_key = self._fifths_to_key_name(written_fifths)
+        
+        # Calculate what the concert key would be for reference
+        semitone_to_fifths = {
+            -2: -2,   # Bb instrument (Trumpet, Clarinet)
+            -7: -9,   # F instrument (French Horn)  
+            9: 3,     # Eb instrument (Alto Sax)
+            0: 0,     # Concert pitch
+        }
+        
+        if transpose_chromatic in semitone_to_fifths:
+            fifths_adjustment = semitone_to_fifths[transpose_chromatic]
+            concert_fifths = written_fifths + fifths_adjustment
+            
+            # Clamp to valid range (-7 to +7 fifths)
+            if concert_fifths < -7:
+                concert_fifths += 12
+            elif concert_fifths > 7:
+                concert_fifths -= 12
+                
+            concert_key = self._fifths_to_key_name(concert_fifths)
+            print(f"    Key signature: {written_key} (written) -> {concert_key} (concert)")
+        else:
+            print(f"    Key signature: {written_key} (written)")
+        
+        # Keep the written key signature as-is - do NOT change it
+        # The <transpose> element handles the concert pitch conversion
+        
+        return content
+    
+    def _fifths_to_key_name(self, fifths):
+        """Convert fifths value to key name."""
+        key_names = {
+            -7: "Cb major", -6: "Gb major", -5: "Db major", -4: "Ab major",
+            -3: "Eb major", -2: "Bb major", -1: "F major", 0: "C major",
+            1: "G major", 2: "D major", 3: "A major", 4: "E major",
+            5: "B major", 6: "F# major", 7: "C# major"
+        }
+        return key_names.get(fifths, f"{fifths} fifths")
     
     def detect_part_name(self, content):
         """
@@ -849,7 +927,7 @@ class MusicXMLSimplifier:
         self.multimeasure_rests_removed = multimeasure_rests_removed
         return content
     
-    def simplify_file(self, input_path, output_path, rules='downbeat', fix_rehearsal='measure_numbers', center_title=False, sync_part_names=None, auto_sync_part_names=False, source_instrument=None, clean_credits=True, remove_multimeasure_rests=False, add_fingerings=False, fingering_style='numbers'):
+    def simplify_file(self, input_path, output_path, rules='downbeat', fix_rehearsal='measure_numbers', center_title=False, sync_part_names=None, auto_sync_part_names=False, source_instrument=None, clean_credits=True, remove_multimeasure_rests=False, add_fingerings=False, fingering_style='numbers', skip_rhythm_simplification=False):
         """
         Simplify a MusicXML file and save the result.
         
@@ -863,6 +941,7 @@ class MusicXMLSimplifier:
             auto_sync_part_names: Whether to auto-detect and sync existing part names
             clean_credits: Whether to clean up credit text
             remove_multimeasure_rests: Whether to convert multi-measure rests
+            skip_rhythm_simplification: Whether to skip rhythm changes and only apply OMR fixes
         """
         
         # Read input file
@@ -873,24 +952,33 @@ class MusicXMLSimplifier:
             print(f"Error reading input file: {e}")
             return False
         
-        # Apply rules
-        if rules == 'downbeat':
+        # Apply rules (skip rhythm simplification if requested)
+        if skip_rhythm_simplification:
+            print("Skipping rhythm simplification - preserving original note values")
+            simplified_content = content
+            self.rules_applied.append('omr_correction_only')
+        elif rules == 'downbeat':
             simplified_content = self.apply_downbeat_rules(content)
             self.rules_applied.append('downbeat_simplification')
         else:
             print(f"Unknown rule set: {rules}")
             return False
         
-        # Transpose high notes for beginner accessibility
-        print(f"\nTransposing high notes for beginners...")
-        simplified_content = self.transpose_high_notes_for_beginners(simplified_content)
+        # Transpose high notes for beginner accessibility (skip if preserving original)
+        if not skip_rhythm_simplification:
+            print(f"\nTransposing high notes for beginners...")
+            simplified_content = self.transpose_high_notes_for_beginners(simplified_content)
+        else:
+            print(f"\nSkipping high note transposition - preserving original pitches")
         
         # Add saxophone fingerings if requested (after transposition to match final pitches)
-        if add_fingerings and source_instrument == 'eb_alto_sax':
+        if add_fingerings and source_instrument == 'eb_alto_sax' and not skip_rhythm_simplification:
             print(f"\nAdding saxophone fingerings...")
             simplified_content = self.add_saxophone_fingerings(simplified_content, fingering_style)
         elif add_fingerings and source_instrument != 'eb_alto_sax':
             print(f"\nWarning: Fingering charts are only available for alto saxophone. Skipping fingerings for {source_instrument}.")
+        elif add_fingerings and skip_rhythm_simplification:
+            print(f"\nSkipping fingering additions - preserving original notation")
         
         # Fix rehearsal marks if requested
         if fix_rehearsal:
@@ -902,13 +990,22 @@ class MusicXMLSimplifier:
             print(f"\nCentering title...")
             simplified_content = self.center_title(simplified_content)
         
-        # Sync part names if requested or auto-sync
+        # Correct instrument metadata if specified (do this before part name sync)
+        if source_instrument:
+            print(f"\nCorrecting instrument metadata...")
+            # Update part names to match instrument when auto-sync is enabled
+            update_parts = auto_sync_part_names and not sync_part_names
+            simplified_content = self.correct_instrument_metadata(simplified_content, source_instrument, update_parts)
+            self.rules_applied.append(f'instrument_correction_{source_instrument}')
+        
+        # Sync part names if requested or auto-sync (after instrument correction)
         if sync_part_names:
             print(f"\nSynchronizing part names...")
             simplified_content = self.sync_part_names(simplified_content, sync_part_names)
             if self.rehearsal_marks_fixed > 0:
                 self.rules_applied.append(f'rehearsal_marks_{fix_rehearsal}')
-        elif auto_sync_part_names:
+        elif auto_sync_part_names and not source_instrument:
+            # Only do auto-sync if we didn't already update part names during instrument correction
             print(f"\nAuto-synchronizing part names...")
             detected_name = self.detect_part_name(simplified_content)
             if detected_name:
@@ -916,12 +1013,6 @@ class MusicXMLSimplifier:
                 self.rules_applied.append('auto_sync_part_names')
             else:
                 print("  No part name detected for auto-sync")
-        
-        # Correct instrument metadata if specified
-        if source_instrument:
-            print(f"\nCorrecting instrument metadata...")
-            simplified_content = self.correct_instrument_metadata(simplified_content, source_instrument)
-            self.rules_applied.append(f'instrument_correction_{source_instrument}')
         
         # Add title from filename if missing (before credit cleaning to avoid duplication)
         print(f"\nAdding title from filename...")
@@ -937,13 +1028,19 @@ class MusicXMLSimplifier:
             print(f"\nRemoving multi-measure rests...")
             simplified_content = self.remove_multimeasure_rests(simplified_content)
         
-        # Update title/metadata to indicate simplification
+        # Update title/metadata to indicate processing type
         # Only auto-update part name if we're not using custom part names or auto-sync
         if not sync_part_names and not auto_sync_part_names:
-            simplified_content = self._update_metadata(simplified_content)
+            if skip_rhythm_simplification:
+                simplified_content = self._update_metadata_omr(simplified_content)
+            else:
+                simplified_content = self._update_metadata(simplified_content)
         else:
             # Just update the software credit, not the part name
-            simplified_content = self._update_software_credit(simplified_content)
+            if skip_rhythm_simplification:
+                simplified_content = self._update_software_credit_omr(simplified_content)
+            else:
+                simplified_content = self._update_software_credit(simplified_content)
         
         # Write output file
         try:
@@ -1276,6 +1373,30 @@ class MusicXMLSimplifier:
         
         return content
     
+    def _update_metadata_omr(self, content):
+        """Update the file metadata to indicate it's been processed for OMR correction."""
+        # Update part name
+        content = re.sub(
+            r'(<miscellaneous-field name="partName">.*?)(</miscellaneous-field>)',
+            r'\1 - OMR Corrected\2',
+            content
+        )
+        
+        # Update software credit
+        content = self._update_software_credit_omr(content)
+        
+        return content
+    
+    def _update_software_credit_omr(self, content):
+        """Update just the software credit to indicate OMR correction processing."""
+        content = re.sub(
+            r'(<software>.*?)(</software>)',
+            r'\1 - OMR Corrected by MusicXML Simplifier\2',
+            content
+        )
+        
+        return content
+    
     def print_summary(self):
         """Print a summary of the simplification process."""
         print(f"\n=== Simplification Summary ===")
@@ -1361,6 +1482,8 @@ def main():
     parser.add_argument('--fingering-style', default='numbers',
                        choices=['numbers', 'holes', 'both'],
                        help='Style of fingering notation: numbers (simple), holes (diagram), or both')
+    parser.add_argument('--skip-rhythm-simplification', action='store_true',
+                       help='Skip rhythm simplification and high note transposition, only apply OMR corrections (instrument metadata, titles, credits, part sync)')
     
     args = parser.parse_args()
     
@@ -1397,7 +1520,7 @@ def main():
     
     rehearsal_mode = None if args.rehearsal == 'none' else args.rehearsal
     clean_credits = not args.no_clean_credits  # Clean credits by default, disable with --no-clean-credits
-    success = simplifier.simplify_file(args.input, args.output, args.rules, rehearsal_mode, args.center_title, args.sync_part_names, args.auto_sync_part_names, source_instrument, clean_credits, args.remove_multimeasure_rests, args.add_fingerings, args.fingering_style)
+    success = simplifier.simplify_file(args.input, args.output, args.rules, rehearsal_mode, args.center_title, args.sync_part_names, args.auto_sync_part_names, source_instrument, clean_credits, args.remove_multimeasure_rests, args.add_fingerings, args.fingering_style, args.skip_rhythm_simplification)
     
     if success:
         print("SUCCESS: Simplification completed successfully!")

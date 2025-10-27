@@ -114,6 +114,8 @@ def process_file(input_path, output_path, args):
     if args.add_fingerings:
         cmd.append("--add-fingerings")
         cmd.extend(["--fingering-style", args.fingering_style])
+    if args.skip_rhythm_simplification:
+        cmd.append("--skip-rhythm-simplification")
     
     print(f"🔄 Processing: {input_path.name}")
     print(f"   -> Output: {output_path.name}")
@@ -180,6 +182,8 @@ def main():
     parser.add_argument('--fingering-style', default='numbers',
                        choices=['numbers', 'holes', 'both'],
                        help='Style of fingering notation: numbers (simple), holes (diagram), or both')
+    parser.add_argument('--skip-rhythm-simplification', action='store_true',
+                       help='Skip rhythm simplification and high note transposition, only apply OMR corrections (instrument metadata, titles, credits, part sync)')
     
     args = parser.parse_args()
     
@@ -199,6 +203,10 @@ def main():
         args.center_title = False
     if args.keep_multimeasure_rests:
         args.remove_multimeasure_rests = False
+    
+    # Update default suffix for OMR correction mode if not explicitly set
+    if args.skip_rhythm_simplification and args.suffix == 'Simplified':
+        args.suffix = 'OMR-Corrected'
     
     # Ensure output directory exists
     output_dir = Path("output-xml")

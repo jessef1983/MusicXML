@@ -31,12 +31,16 @@ MusicXML/
 
 ### Single File Processing
 ```bash
-# Basic usage
+# Basic usage (rhythm simplification for beginners)
 python musicxml_simplifier.py input-xml/your-file.musicxml output-xml/simplified-file.musicxml
 
 # With all beginner-friendly options enabled
 python musicxml_simplifier.py input-xml/your-file.musicxml output-xml/simplified-file.musicxml \
   --sync-part-names "Easy Trumpet" --center-title --remove-multimeasure-rests --verbose
+
+# OMR correction only (preserve original rhythms, fix PDF conversion issues)
+python musicxml_simplifier.py input-xml/your-file.musicxml output-xml/corrected-file.musicxml \
+  --skip-rhythm-simplification --center-title --verbose
 ```
 
 ### Batch Processing (Process all files in input-xml folder)
@@ -50,6 +54,9 @@ python batch_process.py
 python batch_process.py --suffix "Easy" --rehearsal letters \
   --sync-part-names "Beginner Version" --quiet
 
+# OMR correction mode (fix PDF conversion issues without changing rhythms)
+python batch_process.py --skip-rhythm-simplification --suffix "Corrected"
+
 # Minimal processing (rhythm only)
 python batch_process.py --rehearsal none --no-center-title \
   --keep-multimeasure-rests --quiet
@@ -60,13 +67,22 @@ python batch_process.py --dry-run
 
 ## 📋 Features
 
+### 🎼 Rhythm Simplification (Default Mode)
 - **Rhythm Simplification**: Converts eighth note pairs to quarter notes
 - **Downbeat Priority**: Always keeps the first note of each pair
 - **Smart Rest Handling**: Handles rest combinations intelligently
+- **High Note Transposition**: Moves challenging notes to beginner-friendly octaves
+
+### 🔧 OMR Correction Mode (`--skip-rhythm-simplification`)
+- **Original Rhythm Preservation**: Maintains all original note values and pitches
+- **Instrument Metadata Correction**: Fixes wrong transpositions, sounds, MIDI programs
+- **Title Generation**: Adds missing titles from filename
+- **Credit Text Cleanup**: Fixes problematic characters that cause truncation in MuseScore
+- **Part Name Synchronization**: Updates part names consistently across all references
+
+### 🎵 Common Features (Both Modes)
 - **Articulation Preservation**: Maintains important musical markings
 - **Rehearsal Mark Management**: Fix and convert rehearsal marks
-- **Part Name Synchronization**: Update part names consistently
-- **Credit Text Cleanup**: Fixes problematic characters that cause truncation in MuseScore
 - **Multi-measure Rest Removal**: Converts multi-measure rests to individual rests for easier counting
 - **Organized File Structure**: Separate input and output folders for better organization
 
@@ -77,7 +93,14 @@ python batch_process.py --dry-run
 
 ## 🎯 Use Cases
 
+### Rhythm Simplification Mode (Default)
 - **Music Education**: Simplify complex pieces for beginning students
+- **Reading Practice**: Make sight-reading exercises more accessible
+
+### OMR Correction Mode (`--skip-rhythm-simplification`)
+- **PDF Conversion Cleanup**: Fix issues from optical music recognition (OMR) software
+- **Metadata Correction**: Correct instrument assignments and transpositions after scanning
+- **Professional Engraving**: Clean up files while preserving original composer intent
 - **Sight-Reading Practice**: Create easier versions for skill development
 - **Ensemble Preparation**: Generate practice parts at different difficulty levels
 - **Music Therapy**: Adapt pieces for different ability levels
