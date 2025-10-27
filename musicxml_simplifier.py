@@ -932,9 +932,9 @@ class MusicXMLSimplifier:
         """
         Add courtesy accidentals to help C Major students.
         
-        Adds courtesy accidentals when:
-        1. First encounter of any sharp or flat in the piece
-        2. Re-encounter of sharp/flat after stretch of naturals (10+ measures)
+        Pedagogical courtesy rules:
+        1. First occurrence of any sharp or flat (because students learn C major)
+        2. First occurrence after any written accidental (to remind students)
         
         This helps students learning C Major who need reminders about accidentals.
         
@@ -946,28 +946,89 @@ class MusicXMLSimplifier:
         """
         accidentals_added = 0
         
-        # Track first encounters and last seen measure for each note name (regardless of octave)
-        # Format: {note_name: {'first_sharp': measure_num, 'first_flat': measure_num, 'last_accidental': measure_num}}
+        # Track note states for each note name (regardless of octave)
         note_history = {}
         
-        # Get all measures in order
-        measure_pattern = r'<measure[^>]*number="(\d+)"[^>]*>(.*?)</measure>'
-        measures = [(int(match.group(1)), match.group(2)) for match in re.finditer(measure_pattern, content, re.DOTALL)]
-        measures.sort()  # Ensure chronological order
-        
-        # First pass: analyze all accidentals to build history
         print("  Analyzing accidental patterns for C Major students...")
         
-        for measure_num, measure_content in measures:
-            note_pattern = r'<note[^>]*>(.*?)</note>'
+        # Extract measures for processing
+        measure_pattern = r'<measure[^>]*number="(\d+)"[^>]*>(.*?)</measure>'
+        
+        # First pass: collect note history and written accidentals
+        for match in re.finditer(measure_pattern, content, re.DOTALL):
+            measure_num = int(match.group(1))
+            measure_content = match.group(2)
             
+            # Find all notes with pitch in this measure
+            note_pattern = r'<note[^>]*>(.*?)</note>'
             for note_match in re.finditer(note_pattern, measure_content, re.DOTALL):
                 note_content = note_match.group(1)
                 
-                # Skip if not a pitch note (e.g., rests)
+                # Check if this note has pitch
                 pitch_match = re.search(r'<pitch>(.*?)</pitch>', note_content, re.DOTALL)
                 if not pitch_match:
+                    continue  # Skip rests
+                
+                pitch_content = pitch_match.group(1)
+                
+                # Extract step and alter
+                step_match = re.search(r'<step>([A-G])</step>', pitch_content)
+                alter_match = re.search(r'<alter>([-]?\d+)</alter>', pitch_content)
+                accidental_match = re.search(r'<accidental[^>]*>([^<]+)</accidental>', note_content)
+                
+                if not step_match:
                     continue
+                
+                note_name = step_match.group(1)
+                alter_value = int(alter_match.group(1)) if alter_match else 0
+                
+                # Initialize tracking for this note
+                if note_name not in note_history:
+                    note_history[note_name] = {
+                        'first_sharp': None,
+                        'first_flat': None,
+                        'first_natural': None,
+                        'last_written_accidental': None,
+                        'needs_courtesy': set()
+                    }
+                
+                history = note_history[note_name]
+                
+                # Track first encounters with sharp/flat/natural
+                if alter_value == 1 and history['first_sharp'] is None:
+                    history['first_sharp'] = measure_num
+                    history['needs_courtesy'].add(measure_num)
+                    print(f"    First {note_name}# at measure {measure_num} - needs courtesy")
+                elif alter_value == -1 and history['first_flat'] is None:
+                    history['first_flat'] = measure_num
+                    history['needs_courtesy'].add(measure_num)
+                    print(f"    First {note_name}♭ at measure {measure_num} - needs courtesy")
+                elif alter_value == 0 and history['first_natural'] is None:
+                    history['first_natural'] = measure_num
+                    # Naturals don't need courtesy on first encounter in C Major
+                
+                # Track written accidentals (visible symbols)
+                if accidental_match:
+                    accidental_type = accidental_match.group(1)
+                    print(f"    Written {accidental_type} on {note_name} at measure {measure_num}")
+                    history['last_written_accidental'] = measure_num
+        
+        # Second pass: add courtesy accidentals where needed, plus check for post-written-accidental cases
+        processed_notes = set()  # Track which notes have been processed to avoid duplicates
+        
+        for match in re.finditer(measure_pattern, content, re.DOTALL):
+            measure_num = int(match.group(1))
+            measure_content = match.group(2)
+            
+            # Find all notes with pitch in this measure
+            note_pattern = r'<note[^>]*>(.*?)</note>'
+            for note_match in re.finditer(note_pattern, measure_content, re.DOTALL):
+                note_content = note_match.group(1)
+                
+                # Check if this note has pitch
+                pitch_match = re.search(r'<pitch>(.*?)</pitch>', note_content, re.DOTALL)
+                if not pitch_match:
+                    continue  # Skip rests
                 
                 pitch_content = pitch_match.group(1)
                 
@@ -975,27 +1036,41 @@ class MusicXMLSimplifier:
                 step_match = re.search(r'<step>([A-G])</step>', pitch_content)
                 alter_match = re.search(r'<alter>([-]?\d+)</alter>', pitch_content)
                 
-                if step_match:
-                    note_name = step_match.group(1)  # Just the letter name (C, D, E, F, G, A, B)
-                    alter_value = int(alter_match.group(1)) if alter_match else 0
+                if not step_match:
+                    continue
+                
+                note_name = step_match.group(1)
+                alter_value = int(alter_match.group(1)) if alter_match else 0
+                note_key = f"{note_name}_{measure_num}_{alter_value}"
+                
+                # Skip if already processed (avoid duplicates)
+                if note_key in processed_notes:
+                    continue
+                processed_notes.add(note_key)
+                
+                # Check for courtesy after written accidental
+                if note_name in note_history:
+                    history = note_history[note_name]
                     
-                    # Initialize note history if not seen before
-                    if note_name not in note_history:
-                        note_history[note_name] = {'first_sharp': None, 'first_flat': None, 'last_accidental': None}
-                    
-                    # Record first encounters of sharps and flats
-                    if alter_value == 1 and note_history[note_name]['first_sharp'] is None:
-                        note_history[note_name]['first_sharp'] = measure_num
-                        print(f"    First {note_name}# encounter: measure {measure_num}")
-                    elif alter_value == -1 and note_history[note_name]['first_flat'] is None:
-                        note_history[note_name]['first_flat'] = measure_num  
-                        print(f"    First {note_name}♭ encounter: measure {measure_num}")
-                    
-                    # Update last accidental seen
-                    if alter_value != 0:
-                        note_history[note_name]['last_accidental'] = measure_num
-        
-        # Second pass: add courtesy accidentals where needed
+                    # Case: First occurrence after written accidental
+                    if (history['last_written_accidental'] is not None and 
+                        measure_num > history['last_written_accidental'] and
+                        measure_num not in history['needs_courtesy']):
+                        
+                        # This is the first occurrence of this note after a written accidental
+                        history['needs_courtesy'].add(measure_num)
+                        
+                        if alter_value == 0:
+                            print(f"    {note_name} natural at measure {measure_num} needs courtesy (first after written accidental)")
+                        elif alter_value == 1:
+                            print(f"    {note_name}# at measure {measure_num} needs courtesy (first after written accidental)")
+                        elif alter_value == -1:
+                            print(f"    {note_name}♭ at measure {measure_num} needs courtesy (first after written accidental)")
+                        
+                        # Clear the written accidental marker so we don't add courtesy repeatedly
+                        history['last_written_accidental'] = None
+
+        # Third pass: add courtesy accidentals where needed
         def process_measure_for_courtesy(match):
             nonlocal accidentals_added
             measure_num = int(match.group(1))
@@ -1026,33 +1101,23 @@ class MusicXMLSimplifier:
                 note_name = step_match.group(1)
                 alter_value = int(alter_match.group(1)) if alter_match else 0
                 
-                should_add_courtesy = False
-                courtesy_type = None
-                reason = None
-                
-                # Check if we should add courtesy accidental
-                if note_name in note_history:
-                    history = note_history[note_name]
+                # Check if this note needs courtesy accidental
+                if (note_name in note_history and 
+                    measure_num in note_history[note_name]['needs_courtesy']):
                     
-                    # Case 1: First encounter of sharp/flat
-                    if alter_value == 1 and history['first_sharp'] == measure_num:
-                        should_add_courtesy = True
+                    # Determine courtesy type
+                    if alter_value == 1:
                         courtesy_type = 'sharp'
-                        reason = f"first {note_name}# in piece"
-                    elif alter_value == -1 and history['first_flat'] == measure_num:
-                        should_add_courtesy = True
+                        reason = f"pedagogical courtesy for {note_name}#"
+                    elif alter_value == -1:
                         courtesy_type = 'flat'
-                        reason = f"first {note_name}♭ in piece"
+                        reason = f"pedagogical courtesy for {note_name}♭"
+                    elif alter_value == 0:
+                        courtesy_type = 'natural'
+                        reason = f"pedagogical courtesy for {note_name}♮"
+                    else:
+                        return note_match.group(0)  # Unknown alteration
                     
-                    # Case 2: Re-encounter after gap of naturals (10+ measures)
-                    elif alter_value != 0 and history['last_accidental'] is not None:
-                        measures_since_last = measure_num - history['last_accidental']
-                        if measures_since_last >= 10:
-                            should_add_courtesy = True
-                            courtesy_type = 'sharp' if alter_value == 1 else 'flat'
-                            reason = f"{note_name}{'#' if alter_value == 1 else '♭'} after {measures_since_last} measures"
-                
-                if should_add_courtesy and courtesy_type:
                     print(f"  Adding courtesy {courtesy_type} for {note_name} in measure {measure_num} ({reason})")
                     
                     # Insert courtesy accidental after the pitch element
