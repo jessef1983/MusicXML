@@ -1,0 +1,4 @@
+# Keep all files in this directory except .gitkeep
+*
+!.gitkeep
+!.gitignore
