@@ -28,6 +28,7 @@ class MusicXMLSimplifier:
         self.eighth_notes_converted = 0
         self.rehearsal_marks_fixed = 0
         self.multimeasure_rests_removed = 0
+        self.page_system_breaks_removed = 0
         self.courtesy_accidentals_added = 0
         self.trumpet_fingerings_added = 0
         
@@ -1103,6 +1104,76 @@ class MusicXMLSimplifier:
         self.multimeasure_rests_removed = multimeasure_rests_removed
         return content
     
+    def remove_page_system_breaks(self, content):
+        """
+        Remove page breaks and system breaks from the MusicXML file.
+        
+        Page and system breaks are layout formatting that can interfere with
+        automatic layout in music notation software. Removing them allows
+        the software to automatically reformat the music for optimal display.
+        
+        Removes:
+        1. <print new-page="yes"/> and <print new-system="yes"/> attributes
+        2. <page-layout> elements within <defaults>
+        3. <system-layout> elements within <defaults>
+        """
+        
+        print("Removing page and system breaks...")
+        
+        breaks_removed = 0
+        
+        # More conservative approach: Remove specific attributes instead of entire elements
+        
+        # Remove new-page="yes" attributes from print elements
+        new_page_pattern = r'(<print[^>]*)\s+new-page="yes"([^>]*>)'
+        matches = re.findall(new_page_pattern, content)
+        if matches:
+            breaks_removed += len(matches)
+            content = re.sub(new_page_pattern, r'\1\2', content)
+        
+        # Remove new-system="yes" attributes from print elements
+        new_system_pattern = r'(<print[^>]*)\s+new-system="yes"([^>]*>)'
+        matches = re.findall(new_system_pattern, content)
+        if matches:
+            breaks_removed += len(matches)
+            content = re.sub(new_system_pattern, r'\1\2', content)
+        
+        # Remove page-layout elements (more carefully)
+        page_layout_pattern = r'\s*<page-layout>.*?</page-layout>\s*'
+        page_layouts = re.findall(page_layout_pattern, content, re.DOTALL)
+        if page_layouts:
+            breaks_removed += len(page_layouts)
+            content = re.sub(page_layout_pattern, '\n', content, flags=re.DOTALL)
+        
+        # Remove system-layout elements (more carefully)
+        system_layout_pattern = r'\s*<system-layout>.*?</system-layout>\s*'
+        system_layouts = re.findall(system_layout_pattern, content, re.DOTALL)
+        if system_layouts:
+            breaks_removed += len(system_layouts)
+            content = re.sub(system_layout_pattern, '\n', content, flags=re.DOTALL)
+        
+        # Clean up empty print elements that might remain (self-closing only)
+        empty_print_pattern = r'<print\s*/>'
+        empty_prints = re.findall(empty_print_pattern, content)
+        if empty_prints:
+            breaks_removed += len(empty_prints)
+            content = re.sub(empty_print_pattern, '', content)
+        
+        # Clean up print elements that only have whitespace
+        whitespace_print_pattern = r'<print\s*>\s*</print>'
+        whitespace_prints = re.findall(whitespace_print_pattern, content)
+        if whitespace_prints:
+            breaks_removed += len(whitespace_prints)
+            content = re.sub(whitespace_print_pattern, '', content)
+        
+        if breaks_removed > 0:
+            print(f"  Removed {breaks_removed} page/system layout elements")
+        else:
+            print(f"  No page/system breaks found to remove")
+        
+        self.page_system_breaks_removed = breaks_removed
+        return content
+    
     def add_courtesy_accidentals(self, content, source_instrument=None):
         """
         Add courtesy accidentals based on instrument-specific pedagogy.
@@ -1486,7 +1557,7 @@ class MusicXMLSimplifier:
         self.trumpet_fingerings_added = fingerings_added  # Keep same variable name for compatibility
         return content
     
-    def simplify_file(self, input_path, output_path, rules='downbeat', fix_rehearsal='measure_numbers', center_title=False, sync_part_names=None, auto_sync_part_names=False, source_instrument=None, clean_credits=True, remove_multimeasure_rests=False, add_fingerings=False, fingering_style='numbers', skip_rhythm_simplification=False, add_courtesy_accidentals=False, add_courtesy_fingerings=False):
+    def simplify_file(self, input_path, output_path, rules='downbeat', fix_rehearsal='measure_numbers', center_title=False, sync_part_names=None, auto_sync_part_names=False, source_instrument=None, clean_credits=True, remove_multimeasure_rests=False, remove_page_system_breaks=True, add_fingerings=False, fingering_style='numbers', skip_rhythm_simplification=False, add_courtesy_accidentals=False, add_courtesy_fingerings=False):
         """
         Simplify a MusicXML file and save the result.
         
@@ -1586,6 +1657,11 @@ class MusicXMLSimplifier:
         if remove_multimeasure_rests:
             print(f"\nRemoving multi-measure rests...")
             simplified_content = self.remove_multimeasure_rests(simplified_content)
+        
+        # Remove page and system breaks by default (unless suppressed)
+        if remove_page_system_breaks:
+            print(f"\nRemoving page and system breaks...")
+            simplified_content = self.remove_page_system_breaks(simplified_content)
         
         # Add courtesy accidentals if requested
         if add_courtesy_accidentals:
@@ -1973,6 +2049,7 @@ class MusicXMLSimplifier:
         print(f"Eighth notes converted: {self.eighth_notes_converted}")
         print(f"Rehearsal marks fixed: {self.rehearsal_marks_fixed}")
         print(f"Multi-measure rests removed: {self.multimeasure_rests_removed}")
+        print(f"Page/system breaks removed: {self.page_system_breaks_removed}")
         print(f"Courtesy accidentals added: {self.courtesy_accidentals_added}")
         print(f"Courtesy fingerings added: {self.trumpet_fingerings_added}")
         print(f"Rules applied: {', '.join(self.rules_applied)}")
@@ -2047,6 +2124,8 @@ def main():
                        help='Skip cleaning up multi-line credit text (credit cleaning is enabled by default)')
     parser.add_argument('--remove-multimeasure-rests', action='store_true',
                        help='Convert multi-measure rests into individual measure rests for easier counting')
+    parser.add_argument('--keep-page-system-breaks', action='store_true',
+                       help='Keep page and system breaks (by default, page/system breaks are removed for better auto-layout)')
     parser.add_argument('--verbose', '-v', action='store_true',
                        help='Print detailed progress information')
     parser.add_argument('--add-fingerings', action='store_true',
@@ -2096,7 +2175,8 @@ def main():
     
     rehearsal_mode = None if args.rehearsal == 'none' else args.rehearsal
     clean_credits = not args.no_clean_credits  # Clean credits by default, disable with --no-clean-credits
-    success = simplifier.simplify_file(args.input, args.output, args.rules, rehearsal_mode, args.center_title, args.sync_part_names, args.auto_sync_part_names, source_instrument, clean_credits, args.remove_multimeasure_rests, args.add_fingerings, args.fingering_style, args.skip_rhythm_simplification, args.add_courtesy_accidentals, args.add_courtesy_fingerings)
+    remove_breaks = not args.keep_page_system_breaks  # Remove breaks by default, keep with --keep-page-system-breaks
+    success = simplifier.simplify_file(args.input, args.output, args.rules, rehearsal_mode, args.center_title, args.sync_part_names, args.auto_sync_part_names, source_instrument, clean_credits, args.remove_multimeasure_rests, remove_breaks, args.add_fingerings, args.fingering_style, args.skip_rhythm_simplification, args.add_courtesy_accidentals, args.add_courtesy_fingerings)
     
     if success:
         print("SUCCESS: Simplification completed successfully!")

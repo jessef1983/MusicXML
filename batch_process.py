@@ -121,6 +121,8 @@ def process_file(input_path, output_path, args):
         cmd.append("--add-courtesy-accidentals")
     if args.add_courtesy_fingerings:
         cmd.append("--add-courtesy-fingerings")
+    if args.keep_page_system_breaks:
+        cmd.append("--keep-page-system-breaks")
     
     print(f"🔄 Processing: {input_path.name}")
     print(f"   -> Output: {output_path.name}")
@@ -180,6 +182,8 @@ def main():
                        help='Convert multi-measure rests into individual measure rests (default: enabled)')
     parser.add_argument('--keep-multimeasure-rests', action='store_true',
                        help='Keep multi-measure rests as-is')
+    parser.add_argument('--keep-page-system-breaks', action='store_true',
+                       help='Keep page and system breaks (by default, page/system breaks are removed for better auto-layout)')
     parser.add_argument('--dry-run', action='store_true',
                        help='Show what would be processed without actually doing it')
     parser.add_argument('--add-fingerings', action='store_true',
