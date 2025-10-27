@@ -886,7 +886,9 @@ class MusicXMLSimplifier:
         # 3. Now update the remaining credit displays
         credit_pattern = r'(<credit-words[^>]*>)([^<]*(?:Part|Trumpet|Trombone|Tuba|Horn|Flute|Clarinet|Saxophone|Violin|Viola|Cello|Bass|Piano|Guitar|Drum)[^<]*)(</credit-words>)'
         
+        part_name_credit_found = False
         def replace_credit_part_name(match):
+            nonlocal part_name_credit_found
             opening_tag = match.group(1)
             old_name = match.group(2).strip()
             closing_tag = match.group(3)
@@ -894,10 +896,37 @@ class MusicXMLSimplifier:
             # Only replace if it looks like a part name
             if any(word in old_name.lower() for word in ['part', 'trumpet', 'trombone', 'tuba', 'horn', 'flute', 'clarinet', 'sax', 'violin', 'viola', 'cello', 'bass', 'piano', 'guitar', 'drum']):
                 print(f"    Credit display: '{old_name}' -> '{new_part_name}'")
+                part_name_credit_found = True
                 return opening_tag + new_part_name + closing_tag
             return match.group(0)  # No change if not a part name
         
         content = re.sub(credit_pattern, replace_credit_part_name, content)
+        
+        # If no part name credit was found, add one at the top left
+        if not part_name_credit_found:
+            print(f"    Adding part name credit at top left: '{new_part_name}'")
+            # Find the first credit element to determine page layout
+            first_credit_match = re.search(r'<credit[^>]*page="1"[^>]*>', content)
+            if first_credit_match:
+                # Insert new part name credit before the first credit
+                part_name_credit = f'''  <credit page="1">
+    <credit-type>part-name</credit-type>
+    <credit-words default-x="70" default-y="1567" justify="left" valign="top" font-size="14">{new_part_name}</credit-words>
+    </credit>
+'''
+                insert_pos = first_credit_match.start()
+                content = content[:insert_pos] + part_name_credit + content[insert_pos:]
+            else:
+                # No credits exist, add after defaults section
+                defaults_end = content.find('</defaults>')
+                if defaults_end != -1:
+                    part_name_credit = f'''  <credit page="1">
+    <credit-type>part-name</credit-type>
+    <credit-words default-x="70" default-y="1567" justify="left" valign="top" font-size="14">{new_part_name}</credit-words>
+    </credit>
+'''
+                    insert_pos = defaults_end + len('</defaults>')
+                    content = content[:insert_pos] + '\n' + part_name_credit + content[insert_pos:]
         
         # 3. Update part definition (part-name in score-part)
         part_def_pattern = r'(<part-name[^>]*>)[^<]*(</part-name>)'
@@ -1138,12 +1167,32 @@ class MusicXMLSimplifier:
             breaks_removed += len(matches)
             content = re.sub(new_system_pattern, r'\1\2', content)
         
-        # Remove page-layout elements (more carefully)
-        page_layout_pattern = r'\s*<page-layout>.*?</page-layout>\s*'
+        # Remove page-layout elements but preserve page dimensions for title centering
+        page_layout_pattern = r'\s*<page-layout>(.*?)</page-layout>\s*'
+        def preserve_page_dimensions(match):
+            layout_content = match.group(1)
+            # Keep page-width and page-height, remove margins and other layout elements
+            preserved_elements = []
+            
+            page_width_match = re.search(r'<page-width>[\d.]+</page-width>', layout_content)
+            if page_width_match:
+                preserved_elements.append(page_width_match.group(0))
+            
+            page_height_match = re.search(r'<page-height>[\d.]+</page-height>', layout_content)  
+            if page_height_match:
+                preserved_elements.append(page_height_match.group(0))
+            
+            nonlocal breaks_removed
+            breaks_removed += 1
+            
+            if preserved_elements:
+                return f'\n    <page-layout>\n      {chr(10).join(f"      {elem}" for elem in preserved_elements)}\n      </page-layout>\n'
+            else:
+                return '\n'
+        
         page_layouts = re.findall(page_layout_pattern, content, re.DOTALL)
         if page_layouts:
-            breaks_removed += len(page_layouts)
-            content = re.sub(page_layout_pattern, '\n', content, flags=re.DOTALL)
+            content = re.sub(page_layout_pattern, preserve_page_dimensions, content, flags=re.DOTALL)
         
         # Remove system-layout elements (more carefully)
         system_layout_pattern = r'\s*<system-layout>.*?</system-layout>\s*'
@@ -1623,19 +1672,18 @@ class MusicXMLSimplifier:
         # Correct instrument metadata if specified (do this before part name sync)
         if source_instrument:
             print(f"\nCorrecting instrument metadata...")
-            # Update part names to match instrument when auto-sync is enabled
-            update_parts = auto_sync_part_names and not sync_part_names
+            # Always update part names to match instrument (unless explicit sync is requested)
+            update_parts = not sync_part_names
             simplified_content = self.correct_instrument_metadata(simplified_content, source_instrument, update_parts)
             self.rules_applied.append(f'instrument_correction_{source_instrument}')
         
-        # Sync part names if requested or auto-sync (after instrument correction)
+        # Sync part names if explicitly requested (overrides instrument-based part names)
         if sync_part_names:
             print(f"\nSynchronizing part names...")
             simplified_content = self.sync_part_names(simplified_content, sync_part_names)
-            if self.rehearsal_marks_fixed > 0:
-                self.rules_applied.append(f'rehearsal_marks_{fix_rehearsal}')
+            self.rules_applied.append('explicit_part_name_sync')
         elif auto_sync_part_names and not source_instrument:
-            # Only do auto-sync if we didn't already update part names during instrument correction
+            # Auto-sync for cases without source instrument
             print(f"\nAuto-synchronizing part names...")
             detected_name = self.detect_part_name(simplified_content)
             if detected_name:
