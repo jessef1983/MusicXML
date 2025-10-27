@@ -28,6 +28,7 @@ class MusicXMLSimplifier:
         self.eighth_notes_converted = 0
         self.rehearsal_marks_fixed = 0
         self.multimeasure_rests_removed = 0
+        self.courtesy_accidentals_added = 0
         
         # Instrument correction definitions
         self.INSTRUMENT_CORRECTIONS = {
@@ -927,7 +928,163 @@ class MusicXMLSimplifier:
         self.multimeasure_rests_removed = multimeasure_rests_removed
         return content
     
-    def simplify_file(self, input_path, output_path, rules='downbeat', fix_rehearsal='measure_numbers', center_title=False, sync_part_names=None, auto_sync_part_names=False, source_instrument=None, clean_credits=True, remove_multimeasure_rests=False, add_fingerings=False, fingering_style='numbers', skip_rhythm_simplification=False):
+    def add_courtesy_accidentals(self, content):
+        """
+        Add courtesy accidentals to help C Major students.
+        
+        Adds courtesy accidentals when:
+        1. First encounter of any sharp or flat in the piece
+        2. Re-encounter of sharp/flat after stretch of naturals (10+ measures)
+        
+        This helps students learning C Major who need reminders about accidentals.
+        
+        Args:
+            content: MusicXML content string
+            
+        Returns:
+            Modified content with courtesy accidentals added
+        """
+        accidentals_added = 0
+        
+        # Track first encounters and last seen measure for each note name (regardless of octave)
+        # Format: {note_name: {'first_sharp': measure_num, 'first_flat': measure_num, 'last_accidental': measure_num}}
+        note_history = {}
+        
+        # Get all measures in order
+        measure_pattern = r'<measure[^>]*number="(\d+)"[^>]*>(.*?)</measure>'
+        measures = [(int(match.group(1)), match.group(2)) for match in re.finditer(measure_pattern, content, re.DOTALL)]
+        measures.sort()  # Ensure chronological order
+        
+        # First pass: analyze all accidentals to build history
+        print("  Analyzing accidental patterns for C Major students...")
+        
+        for measure_num, measure_content in measures:
+            note_pattern = r'<note[^>]*>(.*?)</note>'
+            
+            for note_match in re.finditer(note_pattern, measure_content, re.DOTALL):
+                note_content = note_match.group(1)
+                
+                # Skip if not a pitch note (e.g., rests)
+                pitch_match = re.search(r'<pitch>(.*?)</pitch>', note_content, re.DOTALL)
+                if not pitch_match:
+                    continue
+                
+                pitch_content = pitch_match.group(1)
+                
+                # Extract step and alter
+                step_match = re.search(r'<step>([A-G])</step>', pitch_content)
+                alter_match = re.search(r'<alter>([-]?\d+)</alter>', pitch_content)
+                
+                if step_match:
+                    note_name = step_match.group(1)  # Just the letter name (C, D, E, F, G, A, B)
+                    alter_value = int(alter_match.group(1)) if alter_match else 0
+                    
+                    # Initialize note history if not seen before
+                    if note_name not in note_history:
+                        note_history[note_name] = {'first_sharp': None, 'first_flat': None, 'last_accidental': None}
+                    
+                    # Record first encounters of sharps and flats
+                    if alter_value == 1 and note_history[note_name]['first_sharp'] is None:
+                        note_history[note_name]['first_sharp'] = measure_num
+                        print(f"    First {note_name}# encounter: measure {measure_num}")
+                    elif alter_value == -1 and note_history[note_name]['first_flat'] is None:
+                        note_history[note_name]['first_flat'] = measure_num  
+                        print(f"    First {note_name}♭ encounter: measure {measure_num}")
+                    
+                    # Update last accidental seen
+                    if alter_value != 0:
+                        note_history[note_name]['last_accidental'] = measure_num
+        
+        # Second pass: add courtesy accidentals where needed
+        def process_measure_for_courtesy(match):
+            nonlocal accidentals_added
+            measure_num = int(match.group(1))
+            measure_content = match.group(2)
+            
+            def add_courtesy_to_note(note_match):
+                nonlocal accidentals_added
+                note_content = note_match.group(1)
+                
+                # Check if this note already has an accidental
+                if '<accidental' in note_content:
+                    return note_match.group(0)  # Already has accidental, don't add courtesy
+                
+                # Check if this note has pitch
+                pitch_match = re.search(r'<pitch>(.*?)</pitch>', note_content, re.DOTALL)
+                if not pitch_match:
+                    return note_match.group(0)  # No pitch (rest, etc.)
+                
+                pitch_content = pitch_match.group(1)
+                
+                # Extract step and alter
+                step_match = re.search(r'<step>([A-G])</step>', pitch_content)
+                alter_match = re.search(r'<alter>([-]?\d+)</alter>', pitch_content)
+                
+                if not step_match:
+                    return note_match.group(0)
+                
+                note_name = step_match.group(1)
+                alter_value = int(alter_match.group(1)) if alter_match else 0
+                
+                should_add_courtesy = False
+                courtesy_type = None
+                reason = None
+                
+                # Check if we should add courtesy accidental
+                if note_name in note_history:
+                    history = note_history[note_name]
+                    
+                    # Case 1: First encounter of sharp/flat
+                    if alter_value == 1 and history['first_sharp'] == measure_num:
+                        should_add_courtesy = True
+                        courtesy_type = 'sharp'
+                        reason = f"first {note_name}# in piece"
+                    elif alter_value == -1 and history['first_flat'] == measure_num:
+                        should_add_courtesy = True
+                        courtesy_type = 'flat'
+                        reason = f"first {note_name}♭ in piece"
+                    
+                    # Case 2: Re-encounter after gap of naturals (10+ measures)
+                    elif alter_value != 0 and history['last_accidental'] is not None:
+                        measures_since_last = measure_num - history['last_accidental']
+                        if measures_since_last >= 10:
+                            should_add_courtesy = True
+                            courtesy_type = 'sharp' if alter_value == 1 else 'flat'
+                            reason = f"{note_name}{'#' if alter_value == 1 else '♭'} after {measures_since_last} measures"
+                
+                if should_add_courtesy and courtesy_type:
+                    print(f"  Adding courtesy {courtesy_type} for {note_name} in measure {measure_num} ({reason})")
+                    
+                    # Insert courtesy accidental after the pitch element
+                    courtesy_accidental = f'<accidental cautionary="yes">{courtesy_type}</accidental>'
+                    
+                    # Find where to insert (after </pitch>)
+                    pitch_end = note_content.find('</pitch>')
+                    if pitch_end != -1:
+                        insertion_point = pitch_end + len('</pitch>')
+                        new_note_content = (note_content[:insertion_point] + 
+                                          '\n        ' + courtesy_accidental + 
+                                          note_content[insertion_point:])
+                        
+                        accidentals_added += 1
+                        return f'<note>{new_note_content}</note>'
+                
+                return note_match.group(0)
+            
+            # Apply courtesy accidental logic to all notes in measure
+            note_pattern = r'<note[^>]*>(.*?)</note>'
+            new_measure_content = re.sub(note_pattern, add_courtesy_to_note, measure_content, flags=re.DOTALL)
+            
+            return f'<measure number="{measure_num}">{new_measure_content}</measure>'
+        
+        # Apply courtesy accidentals to all measures
+        content = re.sub(measure_pattern, process_measure_for_courtesy, content, flags=re.DOTALL)
+        
+        print(f"  Added {accidentals_added} courtesy accidentals for C Major students")
+        self.courtesy_accidentals_added = accidentals_added
+        return content
+    
+    def simplify_file(self, input_path, output_path, rules='downbeat', fix_rehearsal='measure_numbers', center_title=False, sync_part_names=None, auto_sync_part_names=False, source_instrument=None, clean_credits=True, remove_multimeasure_rests=False, add_fingerings=False, fingering_style='numbers', skip_rhythm_simplification=False, add_courtesy_accidentals=False):
         """
         Simplify a MusicXML file and save the result.
         
@@ -1027,6 +1184,11 @@ class MusicXMLSimplifier:
         if remove_multimeasure_rests:
             print(f"\nRemoving multi-measure rests...")
             simplified_content = self.remove_multimeasure_rests(simplified_content)
+        
+        # Add courtesy accidentals if requested
+        if add_courtesy_accidentals:
+            print(f"\nAdding courtesy accidentals...")
+            simplified_content = self.add_courtesy_accidentals(simplified_content)
         
         # Update title/metadata to indicate processing type
         # Only auto-update part name if we're not using custom part names or auto-sync
@@ -1404,6 +1566,7 @@ class MusicXMLSimplifier:
         print(f"Eighth notes converted: {self.eighth_notes_converted}")
         print(f"Rehearsal marks fixed: {self.rehearsal_marks_fixed}")
         print(f"Multi-measure rests removed: {self.multimeasure_rests_removed}")
+        print(f"Courtesy accidentals added: {self.courtesy_accidentals_added}")
         print(f"Rules applied: {', '.join(self.rules_applied)}")
         print("=== End Summary ===\n")
 
@@ -1484,6 +1647,8 @@ def main():
                        help='Style of fingering notation: numbers (simple), holes (diagram), or both')
     parser.add_argument('--skip-rhythm-simplification', action='store_true',
                        help='Skip rhythm simplification and high note transposition, only apply OMR corrections (instrument metadata, titles, credits, part sync)')
+    parser.add_argument('--add-courtesy-accidentals', action='store_true',
+                       help='Add courtesy accidentals after bar lines and octave changes for clarity')
     
     args = parser.parse_args()
     
@@ -1520,7 +1685,7 @@ def main():
     
     rehearsal_mode = None if args.rehearsal == 'none' else args.rehearsal
     clean_credits = not args.no_clean_credits  # Clean credits by default, disable with --no-clean-credits
-    success = simplifier.simplify_file(args.input, args.output, args.rules, rehearsal_mode, args.center_title, args.sync_part_names, args.auto_sync_part_names, source_instrument, clean_credits, args.remove_multimeasure_rests, args.add_fingerings, args.fingering_style, args.skip_rhythm_simplification)
+    success = simplifier.simplify_file(args.input, args.output, args.rules, rehearsal_mode, args.center_title, args.sync_part_names, args.auto_sync_part_names, source_instrument, clean_credits, args.remove_multimeasure_rests, args.add_fingerings, args.fingering_style, args.skip_rhythm_simplification, args.add_courtesy_accidentals)
     
     if success:
         print("SUCCESS: Simplification completed successfully!")

@@ -43,7 +43,7 @@ def get_instrument_selection():
     print()
     while True:
         try:
-            choice = input("Enter your choice (1-6): ").strip()
+            choice = input("Enter your choice (1-7): ").strip()
             if choice in instruments:
                 instrument_key, name = instruments[choice]
                 print(f"Selected: {name} (will be applied to all files)")
@@ -116,6 +116,8 @@ def process_file(input_path, output_path, args):
         cmd.extend(["--fingering-style", args.fingering_style])
     if args.skip_rhythm_simplification:
         cmd.append("--skip-rhythm-simplification")
+    if args.add_courtesy_accidentals:
+        cmd.append("--add-courtesy-accidentals")
     
     print(f"🔄 Processing: {input_path.name}")
     print(f"   -> Output: {output_path.name}")
@@ -184,6 +186,8 @@ def main():
                        help='Style of fingering notation: numbers (simple), holes (diagram), or both')
     parser.add_argument('--skip-rhythm-simplification', action='store_true',
                        help='Skip rhythm simplification and high note transposition, only apply OMR corrections (instrument metadata, titles, credits, part sync)')
+    parser.add_argument('--add-courtesy-accidentals', action='store_true',
+                       help='Add courtesy accidentals after bar lines and octave changes for clarity')
     
     args = parser.parse_args()
     
