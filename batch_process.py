@@ -25,9 +25,10 @@ def get_instrument_selection():
         '1': ('bb_trumpet', 'Bb Trumpet'),
         '2': ('bb_clarinet', 'Bb Clarinet'), 
         '3': ('f_horn', 'F French Horn'),
-        '4': ('eb_alto_sax', 'Eb Alto Saxophone'),
-        '5': ('flute', 'Flute'),
-        '6': ('concert_pitch', 'Concert Pitch (C instruments like Piano)')
+        '4': ('c_euphonium', 'C Euphonium'),
+        '5': ('eb_alto_sax', 'Eb Alto Saxophone'),
+        '6': ('flute', 'Flute'),
+        '7': ('concert_pitch', 'Concert Pitch (C instruments like Piano)')
     }
     
     print("\n🎵 Source Instrument Selection for Batch Processing")
@@ -171,7 +172,7 @@ def main():
     parser.add_argument('--no-auto-sync-part-names', action='store_true',
                        help='Disable automatic part name synchronization')
     parser.add_argument('--source-instrument', type=str, 
-                       choices=['bb_trumpet', 'concert_pitch', 'eb_alto_sax', 'f_horn', 'bb_clarinet', 'flute'],
+                       choices=['bb_trumpet', 'concert_pitch', 'eb_alto_sax', 'f_horn', 'c_euphonium', 'bb_clarinet', 'flute'],
                        help='Correct instrument metadata to match the actual source instrument (applies to all files). If not specified, you will be prompted to select.')
     parser.add_argument('--no-clean-credits', action='store_true',
                        help='Skip cleaning up multi-line credit text')

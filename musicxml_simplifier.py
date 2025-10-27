@@ -73,6 +73,14 @@ class MusicXMLSimplifier:
                 'instrument_sound': 'brass.french-horn',
                 'midi_program': 61  # French Horn
             },
+            'c_euphonium': {
+                'name': 'Euphonium',
+                'part_name': 'Euphonium',  # Concert pitch, no transposition info needed
+                'transpose_chromatic': 0,   # No transposition (concert pitch)
+                'transpose_diatonic': 0,
+                'instrument_sound': 'brass.tuba',
+                'midi_program': 58  # Tuba (closest to euphonium)
+            },
             'bb_clarinet': {
                 'name': 'Clarinet',
                 'part_name': 'Clarinet in Bb',
@@ -218,6 +226,77 @@ class MusicXMLSimplifier:
             ('B', -1, 5): {'fingering': '0', 'valves': [False, False, False]},  # Bb5 (same as A#5) - open
             ('B', 0, 5): {'fingering': '23', 'valves': [False, True, True]},    # B5 (written, sounds E5)
             ('C', 0, 6): {'fingering': '12', 'valves': [True, True, False]},    # C6 (written, sounds F5)
+        }
+        
+        # Concert Euphonium Fingering Chart Database (Bass Clef)
+        # Key: (step, alter, octave) - Value: {'fingering': str, 'valves': [bool, bool, bool]}
+        # Based on standard 3-valve euphonium chart - starts E2 (first ledger line below staff)
+        # Fingering sequence from chart: 123, 13, 23, 12, 1, 2, 0, 123, 13, 23, 12, 1, 2, 0, 23, 12, etc.
+        self.C_EUPHONIUM_FINGERINGS = {
+            # Low register - starting from E2 (first ledger line below bass staff)
+            ('E', 0, 2): {'fingering': '123', 'valves': [True, True, True]},     # E2 - lowest non-pedal note
+            ('F', 0, 2): {'fingering': '13', 'valves': [True, False, True]},     # F2
+            ('F', 1, 2): {'fingering': '23', 'valves': [False, True, True]},     # F#2/Gb2
+            ('G', -1, 2): {'fingering': '23', 'valves': [False, True, True]},    # Gb2
+            ('G', 0, 2): {'fingering': '12', 'valves': [True, True, False]},     # G2
+            ('G', 1, 2): {'fingering': '1', 'valves': [True, False, False]},     # G#2/Ab2
+            ('A', -1, 2): {'fingering': '1', 'valves': [True, False, False]},    # Ab2
+            ('A', 0, 2): {'fingering': '2', 'valves': [False, True, False]},     # A2
+            ('A', 1, 2): {'fingering': '0', 'valves': [False, False, False]},    # A#2/Bb2 - open
+            ('B', -1, 2): {'fingering': '0', 'valves': [False, False, False]},   # Bb2 - open
+            
+            # Next octave - continuing the pattern
+            ('B', 0, 2): {'fingering': '123', 'valves': [True, True, True]},     # B2
+            ('C', 0, 3): {'fingering': '13', 'valves': [True, False, True]},     # C3
+            ('C', 1, 3): {'fingering': '23', 'valves': [False, True, True]},     # C#3/Db3
+            ('D', -1, 3): {'fingering': '23', 'valves': [False, True, True]},    # Db3
+            ('D', 0, 3): {'fingering': '12', 'valves': [True, True, False]},     # D3
+            ('D', 1, 3): {'fingering': '1', 'valves': [True, False, False]},     # D#3/Eb3
+            ('E', -1, 3): {'fingering': '1', 'valves': [True, False, False]},    # Eb3
+            ('E', 0, 3): {'fingering': '2', 'valves': [False, True, False]},     # E3
+            ('F', 0, 3): {'fingering': '0', 'valves': [False, False, False]},    # F3 - open
+            
+            # Upper register - continuing pattern
+            ('F', 1, 3): {'fingering': '23', 'valves': [False, True, True]},     # F#3/Gb3
+            ('G', -1, 3): {'fingering': '23', 'valves': [False, True, True]},    # Gb3
+            ('G', 0, 3): {'fingering': '12', 'valves': [True, True, False]},     # G3
+            ('G', 1, 3): {'fingering': '1', 'valves': [True, False, False]},     # G#3/Ab3
+            ('A', -1, 3): {'fingering': '1', 'valves': [True, False, False]},    # Ab3
+            ('A', 0, 3): {'fingering': '2', 'valves': [False, True, False]},     # A3
+            ('A', 1, 3): {'fingering': '0', 'valves': [False, False, False]},    # A#3/Bb3 - open
+            ('B', -1, 3): {'fingering': '0', 'valves': [False, False, False]},   # Bb3 - open
+            ('B', 0, 3): {'fingering': '23', 'valves': [False, True, True]},     # B3
+            
+            # Higher register
+            ('C', 0, 4): {'fingering': '12', 'valves': [True, True, False]},     # C4
+            ('C', 1, 4): {'fingering': '1', 'valves': [True, False, False]},     # C#4/Db4
+            ('D', -1, 4): {'fingering': '1', 'valves': [True, False, False]},    # Db4
+            ('D', 0, 4): {'fingering': '2', 'valves': [False, True, False]},     # D4
+            ('D', 1, 4): {'fingering': '0', 'valves': [False, False, False]},    # D#4/Eb4 - open
+            ('E', -1, 4): {'fingering': '0', 'valves': [False, False, False]},   # Eb4 - open
+            ('E', 0, 4): {'fingering': '23', 'valves': [False, True, True]},     # E4
+            ('F', 0, 4): {'fingering': '12', 'valves': [True, True, False]},     # F4
+            ('F', 1, 4): {'fingering': '1', 'valves': [True, False, False]},     # F#4/Gb4
+            ('G', -1, 4): {'fingering': '1', 'valves': [True, False, False]},    # Gb4
+            ('G', 0, 4): {'fingering': '2', 'valves': [False, True, False]},     # G4
+            ('G', 1, 4): {'fingering': '0', 'valves': [False, False, False]},    # G#4/Ab4 - open
+            ('A', -1, 4): {'fingering': '0', 'valves': [False, False, False]},   # Ab4 - open
+            ('A', 0, 4): {'fingering': '23', 'valves': [False, True, True]},     # A4
+            ('A', 1, 4): {'fingering': '12', 'valves': [True, True, False]},     # A#4/Bb4
+            ('B', -1, 4): {'fingering': '12', 'valves': [True, True, False]},    # Bb4
+            ('B', 0, 4): {'fingering': '1', 'valves': [True, False, False]},     # B4
+            
+            # Extended upper register
+            ('C', 0, 5): {'fingering': '2', 'valves': [False, True, False]},     # C5
+            ('C', 1, 5): {'fingering': '0', 'valves': [False, False, False]},    # C#5/Db5 - open
+            ('D', -1, 5): {'fingering': '0', 'valves': [False, False, False]},   # Db5 - open
+            ('D', 0, 5): {'fingering': '23', 'valves': [False, True, True]},     # D5
+            ('D', 1, 5): {'fingering': '12', 'valves': [True, True, False]},     # D#5/Eb5
+            ('E', -1, 5): {'fingering': '12', 'valves': [True, True, False]},    # Eb5
+            ('E', 0, 5): {'fingering': '1', 'valves': [True, False, False]},     # E5
+            ('F', 0, 5): {'fingering': '2', 'valves': [False, True, False]},     # F5
+            ('F', 1, 5): {'fingering': '0', 'valves': [False, False, False]},    # F#5/Gb5 - open
+            ('G', -1, 5): {'fingering': '0', 'valves': [False, False, False]},   # Gb5 - open
         }
         
     def apply_downbeat_rules(self, content):
@@ -1024,28 +1103,42 @@ class MusicXMLSimplifier:
         self.multimeasure_rests_removed = multimeasure_rests_removed
         return content
     
-    def add_courtesy_accidentals(self, content):
+    def add_courtesy_accidentals(self, content, source_instrument=None):
         """
-        Add courtesy accidentals to help C Major students.
+        Add courtesy accidentals based on instrument-specific pedagogy.
         
-        Pedagogical courtesy rules:
-        1. First occurrence of any sharp or flat (because students learn C major)
-        2. First occurrence after any written accidental (to remind students)
-        
-        This helps students learning C Major who need reminders about accidentals.
+        Pedagogical courtesy rules by instrument:
+        - C Major instruments (trumpet, etc.): Courtesy for all sharps/flats
+        - Bb Major instruments (euphonium): Skip courtesy for Bb/Eb (home key notes)
+        - General rule: First occurrence after written accidental always gets courtesy
         
         Args:
             content: MusicXML content string
+            source_instrument: Instrument type for pedagogy-specific rules
             
         Returns:
             Modified content with courtesy accidentals added
         """
         accidentals_added = 0
         
+        # Define instrument-specific pedagogy rules
+        instrument_home_keys = {
+            'bb_trumpet': {'flats': [], 'sharps': []},  # C major (no accidentals)
+            'f_horn': {'flats': [], 'sharps': []},     # C major (no accidentals) 
+            'c_euphonium': {'flats': ['B', 'E'], 'sharps': []},  # Bb major (Bb, Eb natural)
+            'eb_alto_sax': {'flats': ['B', 'E', 'A'], 'sharps': []},  # Eb major (3 flats)
+        }
+        
+        # Get pedagogy rules for this instrument
+        home_key = instrument_home_keys.get(source_instrument, {'flats': [], 'sharps': []})
+        natural_flats = set(home_key['flats'])
+        natural_sharps = set(home_key['sharps'])
+        
         # Track note states for each note name (regardless of octave)
         note_history = {}
         
-        print("  Analyzing accidental patterns for C Major students...")
+        instrument_name = source_instrument if source_instrument else "C Major"
+        print(f"  Analyzing accidental patterns for {instrument_name} students...")
         
         # Extract measures for processing
         measure_pattern = r'<measure[^>]*number="(\d+)"[^>]*>(.*?)</measure>'
@@ -1090,18 +1183,26 @@ class MusicXMLSimplifier:
                 
                 history = note_history[note_name]
                 
-                # Track first encounters with sharp/flat/natural
+                # Track first encounters with sharp/flat/natural (instrument-aware)
                 if alter_value == 1 and history['first_sharp'] is None:
                     history['first_sharp'] = measure_num
-                    history['needs_courtesy'].add(measure_num)
-                    print(f"    First {note_name}# at measure {measure_num} - needs courtesy")
+                    # Only add courtesy if sharp is not natural in this instrument's home key
+                    if note_name not in natural_sharps:
+                        history['needs_courtesy'].add(measure_num)
+                        print(f"    First {note_name}# at measure {measure_num} - needs courtesy")
+                    else:
+                        print(f"    First {note_name}# at measure {measure_num} - skipping courtesy (natural in home key)")
                 elif alter_value == -1 and history['first_flat'] is None:
                     history['first_flat'] = measure_num
-                    history['needs_courtesy'].add(measure_num)
-                    print(f"    First {note_name}♭ at measure {measure_num} - needs courtesy")
+                    # Only add courtesy if flat is not natural in this instrument's home key
+                    if note_name not in natural_flats:
+                        history['needs_courtesy'].add(measure_num)
+                        print(f"    First {note_name}♭ at measure {measure_num} - needs courtesy")
+                    else:
+                        print(f"    First {note_name}♭ at measure {measure_num} - skipping courtesy (natural in home key)")
                 elif alter_value == 0 and history['first_natural'] is None:
                     history['first_natural'] = measure_num
-                    # Naturals don't need courtesy on first encounter in C Major
+                    # Naturals don't need courtesy on first encounter (they're natural!)
                 
                 # Track written accidentals (visible symbols)
                 if accidental_match:
@@ -1154,6 +1255,8 @@ class MusicXMLSimplifier:
                         measure_num not in history['needs_courtesy']):
                         
                         # This is the first occurrence of this note after a written accidental
+                        # Always add courtesy after written accidentals (even for home key notes)
+                        # because the written accidental creates pedagogical confusion
                         history['needs_courtesy'].add(measure_num)
                         
                         if alter_value == 0:
@@ -1269,7 +1372,7 @@ class MusicXMLSimplifier:
         
         Args:
             content: MusicXML content string
-            source_instrument: Instrument type ('bb_trumpet' or 'f_horn')
+            source_instrument: Instrument type ('bb_trumpet', 'f_horn', or 'c_euphonium')
             
         Returns:
             Modified content with brass fingerings added to accidental notes
@@ -1283,6 +1386,9 @@ class MusicXMLSimplifier:
         elif source_instrument == 'f_horn':
             fingering_chart = self.F_HORN_FINGERINGS
             instrument_name = "horn"
+        elif source_instrument == 'c_euphonium':
+            fingering_chart = self.C_EUPHONIUM_FINGERINGS
+            instrument_name = "euphonium"
         else:
             print(f"  No fingering chart available for {source_instrument}")
             return content
@@ -1484,10 +1590,10 @@ class MusicXMLSimplifier:
         # Add courtesy accidentals if requested
         if add_courtesy_accidentals:
             print(f"\nAdding courtesy accidentals...")
-            simplified_content = self.add_courtesy_accidentals(simplified_content)
+            simplified_content = self.add_courtesy_accidentals(simplified_content, source_instrument)
         
         # Add courtesy fingerings if requested (for brass instruments)
-        if add_courtesy_fingerings and source_instrument in ['bb_trumpet', 'f_horn']:
+        if add_courtesy_fingerings and source_instrument in ['bb_trumpet', 'f_horn', 'c_euphonium']:
             print(f"\nAdding courtesy fingerings...")
             simplified_content = self.add_brass_fingerings_to_accidentals(simplified_content, source_instrument)
         
@@ -1882,9 +1988,10 @@ def get_instrument_selection():
         '1': ('bb_trumpet', 'Bb Trumpet'),
         '2': ('bb_clarinet', 'Bb Clarinet'), 
         '3': ('f_horn', 'F French Horn'),
-        '4': ('eb_alto_sax', 'Eb Alto Saxophone'),
-        '5': ('flute', 'Flute'),
-        '6': ('concert_pitch', 'Concert Pitch (C instruments like Piano)')
+        '4': ('c_euphonium', 'C Euphonium'),
+        '5': ('eb_alto_sax', 'Eb Alto Saxophone'),
+        '6': ('flute', 'Flute'),
+        '7': ('concert_pitch', 'Concert Pitch (C instruments like Piano)')
     }
     
     print("\n🎵 Source Instrument Selection")
@@ -1934,7 +2041,7 @@ def main():
     parser.add_argument('--auto-sync-part-names', action='store_true',
                        help='Auto-detect and synchronize existing part names for consistency (default in batch mode)')
     parser.add_argument('--source-instrument', type=str, 
-                       choices=['bb_trumpet', 'concert_pitch', 'eb_alto_sax', 'f_horn', 'bb_clarinet', 'flute'],
+                       choices=['bb_trumpet', 'concert_pitch', 'eb_alto_sax', 'f_horn', 'c_euphonium', 'bb_clarinet', 'flute'],
                        help='Correct instrument metadata to match the actual source instrument. If not specified, you will be prompted to select.')
     parser.add_argument('--no-clean-credits', action='store_true',
                        help='Skip cleaning up multi-line credit text (credit cleaning is enabled by default)')
