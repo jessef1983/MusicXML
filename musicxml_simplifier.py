@@ -1292,7 +1292,7 @@ class MusicXMLSimplifier:
         # After source key correction, alto sax in Bb concert = G major written (F# only)
         instrument_home_keys = {
             'bb_trumpet': {'flats': [], 'sharps': []},  # C major written 
-            'f_horn': {'flats': [], 'sharps': []},     # C major written
+            'f_horn': {'flats': ['B'], 'sharps': []}, # F major written (Bb concert -> F major written)
             'c_euphonium': {'flats': ['B', 'E'], 'sharps': []},  # Bb major written
             'eb_alto_sax': {'flats': [], 'sharps': ['F']},  # G major written (after source key correction)
         }
@@ -1695,11 +1695,13 @@ class MusicXMLSimplifier:
             print(f"Error reading input file: {e}")
             return False
         
-        # Transpose from source key if specified (before other processing)
+        # Transpose from source key (now required)
         if source_key and source_instrument:
             print(f"\nTransposing from source key...")
             content = self.transpose_from_source_key(content, source_key, source_instrument)
             self.rules_applied.append(f'source_key_transpose_{source_key}')
+        else:
+            raise ValueError("Both source-key and source-instrument are required parameters")
         
         # Apply rules (skip rhythm simplification if requested)
         if skip_rhythm_simplification:
@@ -1839,7 +1841,7 @@ class MusicXMLSimplifier:
         - Applies transposition consistently to maintain phrase coherence
         
         For alto saxophone: Register break at D5 - transpose D5+ down an octave
-        Safe beginner range: Bb3 to C5 (no octave key needed)
+        Safe beginner range: Bb3 to C5 (both middle C and high C are easy)
         Advanced range: D5 and above (octave key required - transpose down)
         
         For euphonium: Low range accessibility - transpose F2 and below up an octave
@@ -1881,8 +1883,8 @@ class MusicXMLSimplifier:
                             needs_transposition = True
                             transpose_direction = 'up'
                     else:  # Alto saxophone
-                        # Transpose C#5 and above DOWN an octave
-                        if octave > 5 or (octave == 5 and step in ['D', 'E', 'F', 'G', 'A', 'B']) or (octave == 5 and step == 'C' and alter == 1):
+                        # Transpose D5 and above DOWN an octave (C5 is now considered easy)
+                        if octave > 5 or (octave == 5 and step in ['D', 'E', 'F', 'G', 'A', 'B']):
                             needs_transposition = True
                             transpose_direction = 'down'
                     
@@ -1899,6 +1901,8 @@ class MusicXMLSimplifier:
         # Apply nearby note logic to improve transposition decisions
         if len(notes_info) > 1:
             self.apply_nearby_note_logic(notes_info, source_instrument)
+            # Stage 2: Catch super obvious improvements that anyone could see
+            self.apply_obvious_proximity_fixes(notes_info, source_instrument)
         
         # Now apply transpositions based on analysis
         notes_transposed = 0
@@ -1988,55 +1992,174 @@ class MusicXMLSimplifier:
         for i in range(len(notes_info)):
             current = notes_info[i]
             
-            # Skip if already needs transposition
-            if current['needs_transposition']:
-                continue
+            # Process all notes, including those already flagged for range transposition
+            # This allows melodic logic to potentially override or confirm decisions
                 
             # Calculate MIDI note number for context analysis
             current_midi = self.calculate_midi_note(current['step'], current['octave'], current['alter'])
             
+            # Debug specific notes we're interested in
+            if current['step'] == 'C' and current['octave'] == 5 and current['measure_num'] <= 5:
+                print(f"    DEBUG: Analyzing C5 in measure {current['measure_num']}, already flagged: {current['needs_transposition']}")
+            
+
+            
             # Look for nearby notes that might create melodic jumps
             context_notes = []
             
-            # Check previous notes (up to 3)
+            # Check previous notes (up to 3) - look across measure boundaries
             for j in range(max(0, i - 3), i):
-                if notes_info[j]['measure_num'] == current['measure_num']:  # Same measure
-                    prev_midi = self.calculate_midi_note(notes_info[j]['step'], notes_info[j]['octave'], notes_info[j]['alter'])
+                # Include notes from previous measures if they're within 2 measures
+                measure_distance = abs(notes_info[j]['measure_num'] - current['measure_num'])
+                if measure_distance <= 2:
+                    # Calculate the FINAL MIDI position (after any transposition)
+                    prev_note = notes_info[j]
+                    prev_midi = self.calculate_midi_note(prev_note['step'], prev_note['octave'], prev_note['alter'])
+                    if prev_note['needs_transposition']:
+                        # Apply the transposition to get final position
+                        if prev_note.get('transpose_direction') == 'down':
+                            prev_midi -= 12  # Down an octave
+                        elif prev_note.get('transpose_direction') == 'up':
+                            prev_midi += 12  # Up an octave
                     context_notes.append(prev_midi)
                     
-            # Check next notes (up to 3)  
+            # Check next notes (up to 3) - look across measure boundaries  
             for j in range(i + 1, min(len(notes_info), i + 4)):
-                if notes_info[j]['measure_num'] == current['measure_num']:  # Same measure
-                    next_midi = self.calculate_midi_note(notes_info[j]['step'], notes_info[j]['octave'], notes_info[j]['alter'])
+                # Include notes from next measures if they're within 2 measures
+                measure_distance = abs(notes_info[j]['measure_num'] - current['measure_num'])
+                if measure_distance <= 2:
+                    # Calculate the FINAL MIDI position (after any transposition)
+                    next_note = notes_info[j]
+                    next_midi = self.calculate_midi_note(next_note['step'], next_note['octave'], next_note['alter'])
+                    if next_note['needs_transposition']:
+                        # Apply the transposition to get final position  
+                        if next_note.get('transpose_direction') == 'down':
+                            next_midi -= 12  # Down an octave
+                        elif next_note.get('transpose_direction') == 'up':
+                            next_midi += 12  # Up an octave
                     context_notes.append(next_midi)
             
             if context_notes:
-                # Check if current note creates large jumps with context
-                max_jump = max(abs(current_midi - context) for context in context_notes)
+                # Calculate proximity to most recent context note (usually the previous note)
+                most_recent_context = context_notes[-1] if context_notes else None
                 
-                # If large jump detected, consider transposing to reduce it
-                if max_jump > 7:  # More than a perfect 5th
-                    # Try transposing down one octave
-                    test_midi_down = current_midi - 12
-                    if test_midi_down >= min_midi_note:
-                        # Check if transposing down reduces jumps
-                        new_max_jump = max(abs(test_midi_down - context) for context in context_notes)
-                        if new_max_jump < max_jump:
-                            current['needs_transposition'] = True
-                            current['transpose_direction'] = 'down'
-                            current['reason'] = f"Melodic smoothing (jump {max_jump} -> {new_max_jump})"
-                            print(f"    Note {current['step']}{current['octave']} - melodic smoothing (reducing jump from {max_jump} to {new_max_jump})")
-                            continue
+                if most_recent_context:
+                    current_jump = abs(current_midi - most_recent_context)
                     
-                    # Try transposing up one octave
-                    test_midi_up = current_midi + 12
-                    if test_midi_up <= 84:  # Don't go above C6 for most instruments
-                        new_max_jump_up = max(abs(test_midi_up - context) for context in context_notes)
-                        if new_max_jump_up < max_jump:
-                            current['needs_transposition'] = True
-                            current['transpose_direction'] = 'up'
-                            current['reason'] = f"Melodic smoothing (jump {max_jump} -> {new_max_jump_up})"
-                            print(f"    Note {current['step']}{current['octave']} - melodic smoothing (reducing jump from {max_jump} to {new_max_jump_up})")
+
+                    
+                    # Check if octave shifting improves proximity for ANY note with large jumps
+                    if current_jump > 4:  # More than major 3rd
+                        
+                        # Try both octave directions to see which gets closer
+                        test_midi_down = current_midi - 12
+                        test_midi_up = current_midi + 12
+                        
+                        jump_down = abs(test_midi_down - most_recent_context)
+                        jump_up = abs(test_midi_up - most_recent_context)
+                        
+                        # Check beginner range limits for alto sax (avoid going above C5 or below Bb3)
+                        if source_instrument == 'eb_alto_sax':
+                            if test_midi_down < 58:  # Below Bb3
+                                jump_down = float('inf')  
+                            if test_midi_up > 72:  # Above C5 (D5 and above require octave key)
+                                jump_up = float('inf')
+                        elif source_instrument == 'c_euphonium':
+                            if test_midi_down < min_midi_note:  # Below F2
+                                jump_down = float('inf')
+                            if test_midi_up > 81:  # Above A5 (reasonable euphonium upper limit)
+                                jump_up = float('inf')
+                        
+                        # Choose the octave that creates the smallest jump
+                        best_jump = min(current_jump, jump_down, jump_up)
+                        
+                        if best_jump < current_jump:  # Only transpose if it actually helps
+                            if best_jump == jump_down:
+                                current['needs_transposition'] = True
+                                current['transpose_direction'] = 'down'
+                                current['reason'] = f"Phrase proximity (jump {current_jump} -> {best_jump})"
+                                print(f"    Note {current['step']}{current['octave']} - phrase proximity (reducing jump from {current_jump} to {best_jump})")
+                            elif best_jump == jump_up:
+                                current['needs_transposition'] = True
+                                current['transpose_direction'] = 'up' 
+                                current['reason'] = f"Phrase proximity (jump {current_jump} -> {best_jump})"
+                                print(f"    Note {current['step']}{current['octave']} - phrase proximity (reducing jump from {current_jump} to {best_jump})")
+                    
+                    # For notes already flagged, check if the proximity logic suggests a different direction
+                    elif current['needs_transposition'] and current_jump > 4:  # Large jump with existing flag
+                        # Calculate what the current planned transposition would do
+                        if current['transpose_direction'] == 'down':
+                            planned_midi = current_midi - 12
+                        else:
+                            planned_midi = current_midi + 12
+                        planned_jump = abs(planned_midi - most_recent_context)
+                        
+                        # Try the opposite direction
+                        opposite_midi = current_midi + 12 if current['transpose_direction'] == 'down' else current_midi - 12
+                        opposite_jump = abs(opposite_midi - most_recent_context)
+                        
+                        # Check if opposite direction is better and within range
+                        opposite_in_range = False
+                        if source_instrument == 'eb_alto_sax':
+                            opposite_in_range = 58 <= opposite_midi <= 71  # Bb3 to B4
+                        elif source_instrument == 'c_euphonium':
+                            opposite_in_range = min_midi_note <= opposite_midi <= 81
+                        
+                        if opposite_in_range and opposite_jump < planned_jump and opposite_jump < current_jump:
+                            current['transpose_direction'] = 'up' if current['transpose_direction'] == 'down' else 'down'
+                            current['reason'] = f"Proximity override (jump {current_jump} -> {opposite_jump})"
+                            print(f"    Note {current['step']}{current['octave']} - proximity override (reducing jump from {current_jump} to {opposite_jump})")
+                
+                # Also handle large jumps even for notes already flagged for transposition
+                elif current['needs_transposition']:
+                    max_jump = max(abs(current_midi - context) for context in context_notes)
+                    if max_jump > 12:  # Octave or larger - very problematic
+                        # See if the opposite transposition direction might be better
+                        opposite_midi = current_midi + 12 if current['transpose_direction'] == 'down' else current_midi - 12
+                        opposite_jump = max(abs(opposite_midi - context) for context in context_notes)
+                        
+                        if opposite_jump < max_jump and opposite_jump < 8:  # Much better and reasonable
+                            current['transpose_direction'] = 'up' if current['transpose_direction'] == 'down' else 'down'
+                            current['reason'] = f"Melodic correction (jump {max_jump} -> {opposite_jump})"
+                            print(f"    Note {current['step']}{current['octave']} - melodic correction (reducing jump from {max_jump} to {opposite_jump})")
+
+    def apply_obvious_proximity_fixes(self, notes_info, source_instrument):
+        """
+        Dead simple: If C5 would be closer as C4, make it C4. That's it.
+        """
+        print(f"  Simple fixes: C5->C4 if closer to recent notes...")
+        
+        for i in range(len(notes_info)):
+            current = notes_info[i]
+            
+            # Only fix C5 notes that aren't already flagged
+            if (current['step'] == 'C' and current['octave'] == 5 and 
+                not current['needs_transposition']):
+                
+                # Check recent notes for context
+                context_notes = []
+                for j in range(max(0, i-3), i):
+                    if j >= 0:
+                        note = notes_info[j]
+                        midi = self.calculate_midi_note(note['step'], note['octave'], note['alter'])
+                        if note['needs_transposition']:
+                            midi += -12 if note['transpose_direction'] == 'down' else 12
+                        context_notes.append(midi)
+                
+                if context_notes:
+                    recent_midi = context_notes[-1]  # Most recent
+                    c5_midi = 72  # C5
+                    c4_midi = 60  # C4
+                    
+                    c5_jump = abs(c5_midi - recent_midi)
+                    c4_jump = abs(c4_midi - recent_midi)
+                    
+                    # If C4 is closer, use it
+                    if c4_jump < c5_jump:
+                        current['needs_transposition'] = True
+                        current['transpose_direction'] = 'down'
+                        current['reason'] = f"C5->C4 proximity (jump {c5_jump} -> {c4_jump})"
+                        print(f"    FIXED C5: measure {current['measure_num']} - jump {c5_jump} -> {c4_jump}")
 
     def calculate_midi_note(self, step, octave, alter):
         """Convert note to MIDI number for interval calculations"""
@@ -2194,9 +2317,9 @@ class MusicXMLSimplifier:
         elif transpose_semitones == 2:  # Major 2nd up (Bb trumpet) 
             # Bb major (-2) + major 2nd = C major (0) -> difference of +2 fifths
             fifths_change = 2
-        elif transpose_semitones == -5:  # Perfect 4th down (F horn)
-            # Bb major (-2) - perfect 4th = Eb major (-3) -> difference of -1 fifth
-            fifths_change = -1
+        elif transpose_semitones == 7:  # Perfect 5th up (F horn writing transposition)
+            # Bb major (-2) + perfect 5th = F major (-1) -> difference of +1 fifth  
+            fifths_change = 1
         else:
             # Generic calculation: approximate using semitone to fifth conversion
             fifths_change = (transpose_semitones * 7) // 12
@@ -2820,10 +2943,10 @@ def main():
     parser.add_argument('--source-instrument', type=str, required=True,
                        choices=['bb_trumpet', 'concert_pitch', 'eb_alto_sax', 'f_horn', 'c_euphonium', 'bb_clarinet', 'flute'],
                        help='REQUIRED: Correct instrument metadata to match the actual source instrument. Essential because MusicXML metadata is often incorrect.')
-    parser.add_argument('--source-key', type=str,
+    parser.add_argument('--source-key', type=str, required=True,
                        choices=['c_major', 'g_major', 'd_major', 'a_major', 'e_major', 'b_major', 'fs_major', 'cs_major',
                                'f_major', 'bb_major', 'eb_major', 'ab_major', 'db_major', 'gb_major', 'cb_major'],
-                       help='Specify the actual concert key of the source music (overrides any incorrect key signature from OMR). Use this when the input key signature is wrong.')
+                       help='REQUIRED: Specify the actual concert key of the source music (overrides any incorrect key signature from OMR). Essential for proper transposition.')
     parser.add_argument('--no-clean-credits', action='store_true',
                        help='Skip cleaning up multi-line credit text (credit cleaning is enabled by default)')
     parser.add_argument('--remove-multimeasure-rests', action='store_true',
