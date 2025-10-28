@@ -946,6 +946,12 @@ class MusicXMLSimplifier:
         
         content = re.sub(part_def_pattern, replace_part_definition, content)
         
+        # 4. CRITICAL: Update instrument-name in score-part (this is what MuseScore shows in properties!)
+        instrument_name_pattern = r'(<instrument-name>)[^<]*(</instrument-name>)'
+        if re.search(instrument_name_pattern, content):
+            content = re.sub(instrument_name_pattern, f'\\1{new_part_name}\\2', content)
+            print(f"    Instrument name: updated to '{new_part_name}' (displayed in MuseScore properties)")
+        
         return content
     
     def clean_credit_text(self, content):
@@ -1167,11 +1173,11 @@ class MusicXMLSimplifier:
             breaks_removed += len(matches)
             content = re.sub(new_system_pattern, r'\1\2', content)
         
-        # Remove page-layout elements but preserve page dimensions for title centering
+        # Remove page-layout elements but preserve page dimensions and add standard margins
         page_layout_pattern = r'\s*<page-layout>(.*?)</page-layout>\s*'
         def preserve_page_dimensions(match):
             layout_content = match.group(1)
-            # Keep page-width and page-height, remove margins and other layout elements
+            # Keep page-width and page-height, add standard 0.59 inch margins
             preserved_elements = []
             
             page_width_match = re.search(r'<page-width>[\d.]+</page-width>', layout_content)
@@ -1182,17 +1188,52 @@ class MusicXMLSimplifier:
             if page_height_match:
                 preserved_elements.append(page_height_match.group(0))
             
+            # Add standard page margins (0.59 inches = ~86.5 tenths)
+            # Using 86.5 tenths for consistent 0.59 inch margins on all sides
+            margin_elements = [
+                '<page-margins type="both">',
+                '  <left-margin>86.5</left-margin>',
+                '  <right-margin>86.5</right-margin>',
+                '  <top-margin>86.5</top-margin>',
+                '  <bottom-margin>86.5</bottom-margin>',
+                '</page-margins>'
+            ]
+            preserved_elements.extend(margin_elements)
+            
             nonlocal breaks_removed
             breaks_removed += 1
             
             if preserved_elements:
-                return f'\n    <page-layout>\n      {chr(10).join(f"      {elem}" for elem in preserved_elements)}\n      </page-layout>\n'
+                return f'\n    <page-layout>\n      {chr(10).join(f"      {elem}" for elem in preserved_elements)}\n    </page-layout>\n'
             else:
                 return '\n'
         
         page_layouts = re.findall(page_layout_pattern, content, re.DOTALL)
         if page_layouts:
             content = re.sub(page_layout_pattern, preserve_page_dimensions, content, flags=re.DOTALL)
+        else:
+            # No page-layout found, add one with standard margins in defaults section
+            defaults_pattern = r'(<defaults[^>]*>)(.*?)(</defaults>)'
+            defaults_match = re.search(defaults_pattern, content, re.DOTALL)
+            if defaults_match:
+                defaults_start = defaults_match.group(1)
+                defaults_content = defaults_match.group(2)
+                defaults_end = defaults_match.group(3)
+                
+                # Add page layout with standard margins
+                page_layout_xml = '''
+    <page-layout>
+      <page-margins type="both">
+        <left-margin>86.5</left-margin>
+        <right-margin>86.5</right-margin>
+        <top-margin>86.5</top-margin>
+        <bottom-margin>86.5</bottom-margin>
+      </page-margins>
+    </page-layout>'''
+                
+                new_defaults = f'{defaults_start}{defaults_content}{page_layout_xml}\n  {defaults_end}'
+                content = content.replace(defaults_match.group(0), new_defaults)
+                print("  Added standard 0.59 inch margins to page layout")
         
         # Remove system-layout elements (more carefully)
         system_layout_pattern = r'\s*<system-layout>.*?</system-layout>\s*'
@@ -1217,6 +1258,7 @@ class MusicXMLSimplifier:
         
         if breaks_removed > 0:
             print(f"  Removed {breaks_removed} page/system layout elements")
+            print(f"  Set standard 0.59 inch (86.5 tenths) margins on all sides")
         else:
             print(f"  No page/system breaks found to remove")
         
@@ -2159,15 +2201,19 @@ def main():
     parser.add_argument('--rehearsal', default='measure_numbers',
                        choices=['measure_numbers', 'letters', 'none'],
                        help='Fix rehearsal marks: measure_numbers, letters, or none (default: measure_numbers)')
-    parser.add_argument('--center-title', action='store_true',
-                       help='Center the main title horizontally on the page')
+    parser.add_argument('--center-title', action='store_true', default=True,
+                       help='Center the main title horizontally on the page (enabled by default, use --no-center-title to disable)')
+    parser.add_argument('--no-center-title', action='store_false', dest='center_title',
+                       help='Disable title centering')
     parser.add_argument('--sync-part-names', type=str, metavar='NAME',
                        help='Update all part name references to the specified name (e.g., "Part 3 Trumpet Easy")')
-    parser.add_argument('--auto-sync-part-names', action='store_true',
-                       help='Auto-detect and synchronize existing part names for consistency (default in batch mode)')
-    parser.add_argument('--source-instrument', type=str, 
+    parser.add_argument('--auto-sync-part-names', action='store_true', default=True,
+                       help='Auto-detect and synchronize existing part names for consistency (enabled by default, use --no-sync-part-names to disable)')
+    parser.add_argument('--no-sync-part-names', action='store_false', dest='auto_sync_part_names',
+                       help='Disable automatic part name synchronization')
+    parser.add_argument('--source-instrument', type=str, required=True,
                        choices=['bb_trumpet', 'concert_pitch', 'eb_alto_sax', 'f_horn', 'c_euphonium', 'bb_clarinet', 'flute'],
-                       help='Correct instrument metadata to match the actual source instrument. If not specified, you will be prompted to select.')
+                       help='REQUIRED: Correct instrument metadata to match the actual source instrument. Essential because MusicXML metadata is often incorrect.')
     parser.add_argument('--no-clean-credits', action='store_true',
                        help='Skip cleaning up multi-line credit text (credit cleaning is enabled by default)')
     parser.add_argument('--remove-multimeasure-rests', action='store_true',
@@ -2187,6 +2233,8 @@ def main():
                        help='Add courtesy accidentals after bar lines and octave changes for clarity')
     parser.add_argument('--add-courtesy-fingerings', action='store_true',
                        help='Add brass fingerings to all accidental notes (trumpet and horn supported)')
+    parser.add_argument('--filename-suffix', type=str, default='-Simplified',
+                       help='Suffix to add to output filename (default: "-Simplified")')
     
     args = parser.parse_args()
     
@@ -2199,18 +2247,19 @@ def main():
     if not input_path.suffix.lower() in ['.musicxml', '.xml']:
         print(f"Warning: Input file doesn't have .musicxml or .xml extension")
     
-    # Handle source instrument selection (now required)
+    # Source instrument is now required
     source_instrument = args.source_instrument
-    if not source_instrument:
-        source_instrument = get_instrument_selection()
-        if not source_instrument:
-            print("❌ Instrument selection is required. Exiting.")
-            sys.exit(1)
+    
+    # Apply filename suffix to output path
+    output_path = Path(args.output)
+    if args.filename_suffix:
+        # Insert suffix before file extension
+        output_path = output_path.parent / (output_path.stem + args.filename_suffix + output_path.suffix)
     
     # Create simplifier and process file
     simplifier = MusicXMLSimplifier()
     
-    print(f"Simplifying '{args.input}' -> '{args.output}'")
+    print(f"Simplifying '{args.input}' -> '{output_path}'")
     print(f"Using rule set: {args.rules}")
     if args.rehearsal != 'none':
         print(f"Rehearsal mark mode: {args.rehearsal}")
@@ -2224,7 +2273,7 @@ def main():
     rehearsal_mode = None if args.rehearsal == 'none' else args.rehearsal
     clean_credits = not args.no_clean_credits  # Clean credits by default, disable with --no-clean-credits
     remove_breaks = not args.keep_page_system_breaks  # Remove breaks by default, keep with --keep-page-system-breaks
-    success = simplifier.simplify_file(args.input, args.output, args.rules, rehearsal_mode, args.center_title, args.sync_part_names, args.auto_sync_part_names, source_instrument, clean_credits, args.remove_multimeasure_rests, remove_breaks, args.add_fingerings, args.fingering_style, args.skip_rhythm_simplification, args.add_courtesy_accidentals, args.add_courtesy_fingerings)
+    success = simplifier.simplify_file(args.input, str(output_path), args.rules, rehearsal_mode, args.center_title, args.sync_part_names, args.auto_sync_part_names, source_instrument, clean_credits, args.remove_multimeasure_rests, remove_breaks, args.add_fingerings, args.fingering_style, args.skip_rhythm_simplification, args.add_courtesy_accidentals, args.add_courtesy_fingerings)
     
     if success:
         print("SUCCESS: Simplification completed successfully!")
