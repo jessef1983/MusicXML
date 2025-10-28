@@ -1288,15 +1288,16 @@ class MusicXMLSimplifier:
         """
         accidentals_added = 0
         
-        # Define instrument-specific pedagogy rules
+        # Define instrument-specific pedagogy rules based on CORRECTED key signatures
+        # After source key correction, alto sax in Bb concert = G major written (F# only)
         instrument_home_keys = {
-            'bb_trumpet': {'flats': [], 'sharps': []},  # C major (no accidentals)
-            'f_horn': {'flats': [], 'sharps': []},     # C major (no accidentals) 
-            'c_euphonium': {'flats': ['B', 'E'], 'sharps': []},  # Bb major (Bb, Eb natural)
-            'eb_alto_sax': {'flats': ['B', 'E', 'A'], 'sharps': []},  # Eb major (3 flats)
+            'bb_trumpet': {'flats': [], 'sharps': []},  # C major written 
+            'f_horn': {'flats': [], 'sharps': []},     # C major written
+            'c_euphonium': {'flats': ['B', 'E'], 'sharps': []},  # Bb major written
+            'eb_alto_sax': {'flats': [], 'sharps': ['F']},  # G major written (after source key correction)
         }
         
-        # Get pedagogy rules for this instrument
+        # Get pedagogy rules for this instrument  
         home_key = instrument_home_keys.get(source_instrument, {'flats': [], 'sharps': []})
         natural_flats = set(home_key['flats'])
         natural_sharps = set(home_key['sharps'])
@@ -1350,26 +1351,34 @@ class MusicXMLSimplifier:
                 
                 history = note_history[note_name]
                 
-                # Track first encounters with sharp/flat/natural (instrument-aware)
+                # Courtesy accidentals only for key signature notes to help students
                 if alter_value == 1 and history['first_sharp'] is None:
                     history['first_sharp'] = measure_num
-                    # Only add courtesy if sharp is not natural in this instrument's home key
-                    if note_name not in natural_sharps:
+                    if note_name in natural_sharps:
+                        # This note should be sharp per key signature - add courtesy to remind student
                         history['needs_courtesy'].add(measure_num)
-                        print(f"    First {note_name}# at measure {measure_num} - needs courtesy")
+                        print(f"    First {note_name}# at measure {measure_num} - adding courtesy (key signature reminder)")
                     else:
-                        print(f"    First {note_name}# at measure {measure_num} - skipping courtesy (natural in home key)")
+                        # This is a real accidental outside key signature - no courtesy parentheses
+                        print(f"    First {note_name}# at measure {measure_num} - real accidental (not in key signature)")
                 elif alter_value == -1 and history['first_flat'] is None:
-                    history['first_flat'] = measure_num
-                    # Only add courtesy if flat is not natural in this instrument's home key
-                    if note_name not in natural_flats:
+                    history['first_flat'] = measure_num 
+                    if note_name in natural_flats:
+                        # This note should be flat per key signature - add courtesy to remind student
                         history['needs_courtesy'].add(measure_num)
-                        print(f"    First {note_name}♭ at measure {measure_num} - needs courtesy")
+                        print(f"    First {note_name}♭ at measure {measure_num} - adding courtesy (key signature reminder)")
                     else:
-                        print(f"    First {note_name}♭ at measure {measure_num} - skipping courtesy (natural in home key)")
+                        # This is a real accidental outside key signature - no courtesy parentheses
+                        print(f"    First {note_name}♭ at measure {measure_num} - real accidental (not in key signature)")
                 elif alter_value == 0 and history['first_natural'] is None:
                     history['first_natural'] = measure_num
-                    # Naturals don't need courtesy on first encounter (they're natural!)
+                    # Add courtesy natural when key signature says it should be sharp/flat
+                    if note_name in natural_sharps or note_name in natural_flats:
+                        history['needs_courtesy'].add(measure_num)
+                        expected = "sharp" if note_name in natural_sharps else "flat"
+                        print(f"    First {note_name}♮ at measure {measure_num} - adding courtesy natural (overrides key sig {expected})")
+                    else:
+                        print(f"    First {note_name}♮ at measure {measure_num} - normal natural (matches key signature)")
                 
                 # Track written accidentals (visible symbols)
                 if accidental_match:
@@ -1820,9 +1829,14 @@ class MusicXMLSimplifier:
         
         return True
     
-    def transpose_high_notes_for_beginners(self, content, source_instrument=None):
+    def transpose_high_notes_for_beginners(self, content, source_instrument='eb_alto_sax'):
         """
-        Transpose notes for beginner accessibility based on instrument type.
+        Transpose notes for beginner accessibility with melodic context awareness.
+        
+        Enhanced algorithm considers nearby notes to maintain smooth voice leading:
+        - Analyzes melodic intervals between consecutive notes
+        - Avoids creating large octave jumps in melody lines
+        - Applies transposition consistently to maintain phrase coherence
         
         For alto saxophone: Register break at D5 - transpose D5+ down an octave
         Safe beginner range: Bb3 to C5 (no octave key needed)
@@ -1832,9 +1846,61 @@ class MusicXMLSimplifier:
         Bass clef staff range: G2 (bottom line) to A4 (top line)
         F below staff (F2) and lower are difficult for beginners - transpose up
         """
-        instrument_name = source_instrument or "alto saxophone"
+        instrument_name = source_instrument.replace('_', ' ').title()
         print(f"Transposing notes for beginner {instrument_name} accessibility...")
         
+        # Extract all notes with measure context for analysis
+        notes_info = []
+        measure_num = 1
+        
+        # Split content by measures to track position context
+        measures = re.split(r'<measure[^>]*>', content)
+        
+        for measure_idx, measure_content in enumerate(measures[1:], 1):  # Skip first split (before first measure)
+            note_pattern = r'<pitch>(.*?)</pitch>'
+            
+            for match in re.finditer(note_pattern, measure_content, flags=re.DOTALL):
+                pitch_content = match.group(1)
+                
+                step_match = re.search(r'<step>([A-G])</step>', pitch_content)
+                octave_match = re.search(r'<octave>(\d+)</octave>', pitch_content)
+                alter_match = re.search(r'<alter>([-]?\d+)</alter>', pitch_content)
+                
+                if step_match and octave_match:
+                    step = step_match.group(1)
+                    octave = int(octave_match.group(1))
+                    alter = int(alter_match.group(1)) if alter_match else 0
+                    
+                    # Determine initial transposition needs (basic range logic)
+                    needs_transposition = False
+                    transpose_direction = None
+                    
+                    if source_instrument == 'c_euphonium':
+                        # Transpose F2 and below UP an octave
+                        if octave < 2 or (octave == 2 and step in ['E', 'F']):
+                            needs_transposition = True
+                            transpose_direction = 'up'
+                    else:  # Alto saxophone
+                        # Transpose C#5 and above DOWN an octave
+                        if octave > 5 or (octave == 5 and step in ['D', 'E', 'F', 'G', 'A', 'B']) or (octave == 5 and step == 'C' and alter == 1):
+                            needs_transposition = True
+                            transpose_direction = 'down'
+                    
+                    notes_info.append({
+                        'step': step,
+                        'octave': octave,
+                        'alter': alter,
+                        'measure_num': measure_idx,
+                        'needs_transposition': needs_transposition,
+                        'transpose_direction': transpose_direction,
+                        'reason': 'Range constraint' if needs_transposition else None
+                    })
+        
+        # Apply nearby note logic to improve transposition decisions
+        if len(notes_info) > 1:
+            self.apply_nearby_note_logic(notes_info, source_instrument)
+        
+        # Now apply transpositions based on analysis
         notes_transposed = 0
         
         def transpose_pitch_block(match):
@@ -1842,66 +1908,52 @@ class MusicXMLSimplifier:
             
             pitch_content = match.group(1)
             
-            # Extract step, octave, and alter using regex
+            # Extract step, octave, and alter
             step_match = re.search(r'<step>([A-G])</step>', pitch_content)
             octave_match = re.search(r'<octave>(\d+)</octave>', pitch_content)
             alter_match = re.search(r'<alter>([-]?\d+)</alter>', pitch_content)
             
             if not step_match or not octave_match:
-                return match.group(0)  # Return unchanged if we can't parse
-            
+                return match.group(0)
+                
             step = step_match.group(1)
             octave = int(octave_match.group(1))
-            alter = int(alter_match.group(1)) if alter_match else None
+            alter = int(alter_match.group(1)) if alter_match else 0
             
-            needs_transposition = False
-            transpose_direction = None
+            # Find this note in our analyzed notes_info
+            note_decision = None
+            for note_info in notes_info:
+                if (note_info['step'] == step and 
+                    note_info['octave'] == octave and 
+                    note_info['alter'] == alter):
+                    note_decision = note_info
+                    break
             
-            # Euphonium-specific range adjustments
-            if source_instrument == 'c_euphonium':
-                # Transpose F2 and below UP an octave (F below staff and lower)
-                if octave < 2:
-                    needs_transposition = True
-                    transpose_direction = 'up'
-                elif octave == 2 and step in ['E', 'F']:
-                    needs_transposition = True
-                    transpose_direction = 'up'
-            else:
-                # Alto saxophone logic (default)
-                # Determine if note needs transposition (C#5 and above)
-                # C5 is the highest note beginners should play without octave key
-                if octave > 5:
-                    needs_transposition = True
-                    transpose_direction = 'down'
-                elif octave == 5 and step in ['D', 'E', 'F', 'G', 'A', 'B']:
-                    needs_transposition = True
-                    transpose_direction = 'down'
-                elif octave == 5 and step == 'C' and alter == 1:  # C#5 should also be transposed
-                    needs_transposition = True
-                    transpose_direction = 'down'
-            
-            # Transpose if needed
-            if needs_transposition:
-                if transpose_direction == 'up':
+            # Apply transposition if decided
+            if note_decision and note_decision['needs_transposition']:
+                direction = note_decision['transpose_direction']
+                reason = note_decision.get('reason', 'Unknown')
+                
+                if direction == 'up':
                     new_octave = octave + 1
                     direction_text = "up"
-                else:  # transpose_direction == 'down'
+                else:  # direction == 'down'
                     new_octave = octave - 1
                     direction_text = "down"
                 
                 notes_transposed += 1
                 
-                # Replace the octave value in the pitch content
+                # Replace the octave value
                 new_pitch_content = re.sub(r'<octave>\d+</octave>', f'<octave>{new_octave}</octave>', pitch_content)
                 
                 alter_str = f"#{alter}" if alter == 1 else f"b{-alter}" if alter == -1 else ""
-                print(f"  Transposed {step}{alter_str}{octave} -> {step}{alter_str}{new_octave} ({direction_text})")
+                print(f"  Transposed {step}{alter_str}{octave} -> {step}{alter_str}{new_octave} ({direction_text}) - {reason}")
                 
                 return f'<pitch>{new_pitch_content}</pitch>'
             else:
                 return match.group(0)  # Return unchanged
         
-        # Use regex to find and process all pitch blocks
+        # Apply all transpositions
         result_content = re.sub(r'<pitch>(.*?)</pitch>', transpose_pitch_block, content, flags=re.DOTALL)
         
         if notes_transposed > 0:
@@ -1916,6 +1968,80 @@ class MusicXMLSimplifier:
                 print(f"  No high notes found that needed transposition")
         
         return result_content
+    
+    def apply_nearby_note_logic(self, notes_info, source_instrument):
+        """
+        Apply melodic context logic to improve transposition decisions.
+        Enhanced with phrase awareness and minimum note thresholds.
+        """
+        if len(notes_info) < 2:
+            return
+            
+        print(f"  Applying nearby note logic for smoother voice leading...")
+        
+        # Set minimum MIDI note thresholds to avoid going too low
+        if source_instrument == 'c_euphonium':
+            min_midi_note = 41  # F2 - don't go below this for euphonium
+        else:  # Alto saxophone
+            min_midi_note = 60  # C4 - avoid going below C4 for beginner alto sax
+            
+        for i in range(len(notes_info)):
+            current = notes_info[i]
+            
+            # Skip if already needs transposition
+            if current['needs_transposition']:
+                continue
+                
+            # Calculate MIDI note number for context analysis
+            current_midi = self.calculate_midi_note(current['step'], current['octave'], current['alter'])
+            
+            # Look for nearby notes that might create melodic jumps
+            context_notes = []
+            
+            # Check previous notes (up to 3)
+            for j in range(max(0, i - 3), i):
+                if notes_info[j]['measure_num'] == current['measure_num']:  # Same measure
+                    prev_midi = self.calculate_midi_note(notes_info[j]['step'], notes_info[j]['octave'], notes_info[j]['alter'])
+                    context_notes.append(prev_midi)
+                    
+            # Check next notes (up to 3)  
+            for j in range(i + 1, min(len(notes_info), i + 4)):
+                if notes_info[j]['measure_num'] == current['measure_num']:  # Same measure
+                    next_midi = self.calculate_midi_note(notes_info[j]['step'], notes_info[j]['octave'], notes_info[j]['alter'])
+                    context_notes.append(next_midi)
+            
+            if context_notes:
+                # Check if current note creates large jumps with context
+                max_jump = max(abs(current_midi - context) for context in context_notes)
+                
+                # If large jump detected, consider transposing to reduce it
+                if max_jump > 7:  # More than a perfect 5th
+                    # Try transposing down one octave
+                    test_midi_down = current_midi - 12
+                    if test_midi_down >= min_midi_note:
+                        # Check if transposing down reduces jumps
+                        new_max_jump = max(abs(test_midi_down - context) for context in context_notes)
+                        if new_max_jump < max_jump:
+                            current['needs_transposition'] = True
+                            current['transpose_direction'] = 'down'
+                            current['reason'] = f"Melodic smoothing (jump {max_jump} -> {new_max_jump})"
+                            print(f"    Note {current['step']}{current['octave']} - melodic smoothing (reducing jump from {max_jump} to {new_max_jump})")
+                            continue
+                    
+                    # Try transposing up one octave
+                    test_midi_up = current_midi + 12
+                    if test_midi_up <= 84:  # Don't go above C6 for most instruments
+                        new_max_jump_up = max(abs(test_midi_up - context) for context in context_notes)
+                        if new_max_jump_up < max_jump:
+                            current['needs_transposition'] = True
+                            current['transpose_direction'] = 'up'
+                            current['reason'] = f"Melodic smoothing (jump {max_jump} -> {new_max_jump_up})"
+                            print(f"    Note {current['step']}{current['octave']} - melodic smoothing (reducing jump from {max_jump} to {new_max_jump_up})")
+
+    def calculate_midi_note(self, step, octave, alter):
+        """Convert note to MIDI number for interval calculations"""
+        note_values = {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}
+        return (octave * 12) + note_values[step] + alter
     
     def correct_stem_directions(self, content, source_instrument=None):
         """
