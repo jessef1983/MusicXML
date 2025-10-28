@@ -10,11 +10,10 @@ Date: 2025-10-23
 """
 
 import re
-
-import re
 import sys
 import argparse
 from pathlib import Path
+import xml.etree.ElementTree as ET
 
 
 class MusicXMLSimplifier:
@@ -30,6 +29,12 @@ class MusicXMLSimplifier:
         self.multimeasure_rests_removed = 0
         self.page_system_breaks_removed = 0
         self.courtesy_accidentals_added = 0
+        
+        # Key signature mappings (number of sharps/flats)
+        self.KEY_SIGNATURES = {
+            'c_major': 0, 'g_major': 1, 'd_major': 2, 'a_major': 3, 'e_major': 4, 'b_major': 5, 'fs_major': 6, 'cs_major': 7,
+            'f_major': -1, 'bb_major': -2, 'eb_major': -3, 'ab_major': -4, 'db_major': -5, 'gb_major': -6, 'cb_major': -7
+        }
         self.trumpet_fingerings_added = 0
         
         # Instrument correction definitions
@@ -1504,7 +1509,11 @@ class MusicXMLSimplifier:
                                           note_content[insertion_point:])
                         
                         accidentals_added += 1
-                        return f'<note>{new_note_content}</note>'
+                        # Preserve original note element with its attributes
+                        original_note_tag = note_match.group(0)
+                        note_start = original_note_tag.find('>') + 1
+                        note_end = original_note_tag.rfind('<')
+                        return original_note_tag[:note_start] + new_note_content + original_note_tag[note_end:]
                 
                 return note_match.group(0)
             
@@ -1634,7 +1643,11 @@ class MusicXMLSimplifier:
                                           note_content[insertion_point:])
                     
                     fingerings_added += 1
-                    return f'<note>{new_note_content}</note>'
+                    # Preserve original note element with its attributes
+                    original_note_tag = match.group(0)
+                    note_start = original_note_tag.find('>') + 1
+                    note_end = original_note_tag.rfind('<')
+                    return original_note_tag[:note_start] + new_note_content + original_note_tag[note_end:]
             else:
                 # Note is outside normal trumpet range or not in fingering chart
                 return match.group(0)
@@ -1648,7 +1661,7 @@ class MusicXMLSimplifier:
         self.trumpet_fingerings_added = fingerings_added  # Keep same variable name for compatibility
         return content
     
-    def simplify_file(self, input_path, output_path, rules='downbeat', fix_rehearsal='measure_numbers', center_title=False, sync_part_names=None, auto_sync_part_names=False, source_instrument=None, clean_credits=True, remove_multimeasure_rests=False, remove_page_system_breaks=True, add_fingerings=False, fingering_style='numbers', skip_rhythm_simplification=False, add_courtesy_accidentals=False, add_courtesy_fingerings=False):
+    def simplify_file(self, input_path, output_path, rules='downbeat', fix_rehearsal='measure_numbers', center_title=False, sync_part_names=None, auto_sync_part_names=False, source_instrument=None, source_key=None, clean_credits=True, remove_multimeasure_rests=False, remove_page_system_breaks=True, add_fingerings=False, fingering_style='numbers', skip_rhythm_simplification=False, add_courtesy_accidentals=False, add_courtesy_fingerings=False):
         """
         Simplify a MusicXML file and save the result.
         
@@ -1673,6 +1686,12 @@ class MusicXMLSimplifier:
             print(f"Error reading input file: {e}")
             return False
         
+        # Transpose from source key if specified (before other processing)
+        if source_key and source_instrument:
+            print(f"\nTransposing from source key...")
+            content = self.transpose_from_source_key(content, source_key, source_instrument)
+            self.rules_applied.append(f'source_key_transpose_{source_key}')
+        
         # Apply rules (skip rhythm simplification if requested)
         if skip_rhythm_simplification:
             print("Skipping rhythm simplification - preserving original note values")
@@ -1685,12 +1704,16 @@ class MusicXMLSimplifier:
             print(f"Unknown rule set: {rules}")
             return False
         
-        # Transpose high notes for beginner accessibility (skip if preserving original)
+        # Transpose notes for beginner accessibility (skip if preserving original)
         if not skip_rhythm_simplification:
-            print(f"\nTransposing high notes for beginners...")
-            simplified_content = self.transpose_high_notes_for_beginners(simplified_content)
+            print(f"\nTransposing notes for beginners...")
+            simplified_content = self.transpose_high_notes_for_beginners(simplified_content, source_instrument)
+            
+            # Correct stem directions after transposition
+            print(f"\nCorrecting stem directions after transposition...")
+            simplified_content = self.correct_stem_directions(simplified_content, source_instrument)
         else:
-            print(f"\nSkipping high note transposition - preserving original pitches")
+            print(f"\nSkipping note transposition - preserving original pitches")
         
         # Add saxophone fingerings if requested (after transposition to match final pitches)
         if add_fingerings and source_instrument == 'eb_alto_sax' and not skip_rhythm_simplification:
@@ -1785,20 +1808,32 @@ class MusicXMLSimplifier:
             print(f"Error writing output file: {e}")
             return False
         
+        # Validate XML structure after writing
+        print(f"\nValidating XML structure...")
+        is_valid, validation_message = self.validate_xml_structure(output_path)
+        if is_valid:
+            print(f"✅ XML validation passed: {validation_message}")
+        else:
+            print(f"❌ XML validation FAILED: {validation_message}")
+            print(f"⚠️  File may not open correctly in music notation software!")
+            return False
+        
         return True
     
-    def transpose_high_notes_for_beginners(self, content):
+    def transpose_high_notes_for_beginners(self, content, source_instrument=None):
         """
-        Transpose notes that are too high for beginner alto sax players.
+        Transpose notes for beginner accessibility based on instrument type.
         
-        For alto saxophone, the register break happens at D5. Notes D5 and above
-        require the octave key and are challenging for beginners. This function
-        transposes such notes down by one octave to make them more accessible.
-        
+        For alto saxophone: Register break at D5 - transpose D5+ down an octave
         Safe beginner range: Bb3 to C5 (no octave key needed)
         Advanced range: D5 and above (octave key required - transpose down)
+        
+        For euphonium: Low range accessibility - transpose F2 and below up an octave
+        Bass clef staff range: G2 (bottom line) to A4 (top line)
+        F below staff (F2) and lower are difficult for beginners - transpose up
         """
-        print("Transposing high notes for beginner accessibility...")
+        instrument_name = source_instrument or "alto saxophone"
+        print(f"Transposing notes for beginner {instrument_name} accessibility...")
         
         notes_transposed = 0
         
@@ -1819,26 +1854,48 @@ class MusicXMLSimplifier:
             octave = int(octave_match.group(1))
             alter = int(alter_match.group(1)) if alter_match else None
             
-            # Determine if note needs transposition (C#5 and above)
-            # C5 is the highest note beginners should play without octave key
             needs_transposition = False
-            if octave > 5:
-                needs_transposition = True
-            elif octave == 5 and step in ['D', 'E', 'F', 'G', 'A', 'B']:
-                needs_transposition = True
-            elif octave == 5 and step == 'C' and alter == 1:  # C#5 should also be transposed
-                needs_transposition = True
+            transpose_direction = None
+            
+            # Euphonium-specific range adjustments
+            if source_instrument == 'c_euphonium':
+                # Transpose F2 and below UP an octave (F below staff and lower)
+                if octave < 2:
+                    needs_transposition = True
+                    transpose_direction = 'up'
+                elif octave == 2 and step in ['E', 'F']:
+                    needs_transposition = True
+                    transpose_direction = 'up'
+            else:
+                # Alto saxophone logic (default)
+                # Determine if note needs transposition (C#5 and above)
+                # C5 is the highest note beginners should play without octave key
+                if octave > 5:
+                    needs_transposition = True
+                    transpose_direction = 'down'
+                elif octave == 5 and step in ['D', 'E', 'F', 'G', 'A', 'B']:
+                    needs_transposition = True
+                    transpose_direction = 'down'
+                elif octave == 5 and step == 'C' and alter == 1:  # C#5 should also be transposed
+                    needs_transposition = True
+                    transpose_direction = 'down'
             
             # Transpose if needed
             if needs_transposition:
-                new_octave = octave - 1
+                if transpose_direction == 'up':
+                    new_octave = octave + 1
+                    direction_text = "up"
+                else:  # transpose_direction == 'down'
+                    new_octave = octave - 1
+                    direction_text = "down"
+                
                 notes_transposed += 1
                 
                 # Replace the octave value in the pitch content
                 new_pitch_content = re.sub(r'<octave>\d+</octave>', f'<octave>{new_octave}</octave>', pitch_content)
                 
                 alter_str = f"#{alter}" if alter == 1 else f"b{-alter}" if alter == -1 else ""
-                print(f"  Transposed {step}{alter_str}{octave} -> {step}{alter_str}{new_octave}")
+                print(f"  Transposed {step}{alter_str}{octave} -> {step}{alter_str}{new_octave} ({direction_text})")
                 
                 return f'<pitch>{new_pitch_content}</pitch>'
             else:
@@ -1848,11 +1905,434 @@ class MusicXMLSimplifier:
         result_content = re.sub(r'<pitch>(.*?)</pitch>', transpose_pitch_block, content, flags=re.DOTALL)
         
         if notes_transposed > 0:
-            print(f"  Transposed {notes_transposed} high notes down one octave for beginner accessibility")
+            if source_instrument == 'c_euphonium':
+                print(f"  Transposed {notes_transposed} low notes up one octave for euphonium range accessibility")
+            else:
+                print(f"  Transposed {notes_transposed} high notes down one octave for beginner accessibility")
         else:
-            print(f"  No high notes found that needed transposition")
+            if source_instrument == 'c_euphonium':
+                print(f"  No low notes found that needed transposition")
+            else:
+                print(f"  No high notes found that needed transposition")
         
         return result_content
+    
+    def correct_stem_directions(self, content, source_instrument=None):
+        """
+        Correct stem directions based on note positions after transposition.
+        
+        Stem direction rules:
+        - Bass Clef (euphonium): Notes below D3 = stems up, D3+ = stems down
+        - Treble Clef (alto sax): Notes below B4 = stems up, B4+ = stems down
+        
+        Args:
+            content: MusicXML content string
+            source_instrument: Instrument type to determine clef and stem rules
+            
+        Returns:
+            Modified content with corrected stem directions
+        """
+        if not source_instrument:
+            return content
+            
+        stems_corrected = 0
+        
+        # Determine clef and middle line note for stem direction rules
+        if source_instrument == 'c_euphonium':
+            # Bass clef: middle line is D3
+            middle_step = 'D'
+            middle_octave = 3
+            clef_name = "bass clef"
+        elif source_instrument in ['eb_alto_sax', 'bb_trumpet', 'f_horn']:
+            # Treble clef: middle line is B4
+            middle_step = 'B' 
+            middle_octave = 4
+            clef_name = "treble clef"
+        else:
+            # Unknown instrument, skip stem correction
+            return content
+            
+        print(f"  Correcting stem directions for {clef_name} ({middle_step}{middle_octave} = middle line)...")
+        
+        def correct_note_stem(match):
+            nonlocal stems_corrected
+            
+            note_content = match.group(1)
+            
+            # Skip rests (no pitch = no stem direction needed)
+            if '<rest' in note_content:
+                return match.group(0)
+            
+            # Extract pitch information
+            pitch_match = re.search(r'<pitch>(.*?)</pitch>', note_content, re.DOTALL)
+            if not pitch_match:
+                return match.group(0)
+                
+            pitch_content = pitch_match.group(1)
+            
+            # Extract step, octave, and alter
+            step_match = re.search(r'<step>([A-G])</step>', pitch_content)
+            octave_match = re.search(r'<octave>(\d+)</octave>', pitch_content)
+            alter_match = re.search(r'<alter>([-]?\d+)</alter>', pitch_content)
+            
+            if not step_match or not octave_match:
+                return match.group(0)
+                
+            step = step_match.group(1)
+            octave = int(octave_match.group(1))
+            alter = int(alter_match.group(1)) if alter_match else 0
+            
+            # Calculate note position relative to middle line
+            # Convert note to semitones for comparison
+            note_positions = {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}
+            current_semitones = (octave * 12) + note_positions[step] + alter
+            middle_semitones = (middle_octave * 12) + note_positions[middle_step]
+            
+            # Determine correct stem direction
+            if current_semitones < middle_semitones:
+                correct_stem = "up"
+            else:
+                correct_stem = "down"
+            
+            # Find existing stem direction
+            stem_match = re.search(r'<stem>([^<]+)</stem>', note_content)
+            if stem_match:
+                current_stem = stem_match.group(1)
+                if current_stem != correct_stem:
+                    # Replace incorrect stem direction
+                    new_note_content = re.sub(r'<stem>[^<]+</stem>', f'<stem>{correct_stem}</stem>', note_content)
+                    stems_corrected += 1
+                    
+                    alter_str = f"#{alter}" if alter > 0 else f"b{-alter}" if alter < 0 else ""
+                    print(f"    Fixed stem: {step}{alter_str}{octave} {current_stem} -> {correct_stem}")
+                    
+                    # Preserve original note element with its attributes
+                    original_note_tag = match.group(0)
+                    note_start = original_note_tag.find('>') + 1
+                    note_end = original_note_tag.rfind('<')
+                    return original_note_tag[:note_start] + new_note_content + original_note_tag[note_end:]
+            
+            return match.group(0)  # No change needed
+        
+        # Apply stem corrections to all notes
+        note_pattern = r'<note[^>]*>(.*?)</note>'
+        result_content = re.sub(note_pattern, correct_note_stem, content, flags=re.DOTALL)
+        
+        if stems_corrected > 0:
+            print(f"  Corrected {stems_corrected} stem directions for proper {clef_name} notation")
+        else:
+            print(f"  No stem direction corrections needed")
+            
+        return result_content
+    
+    def transpose_from_source_key(self, content, source_key, target_instrument):
+        """
+        Transpose music from specified source key to proper written key for target instrument.
+        
+        This handles cases where the input key signature is incorrect (e.g., from OMR errors)
+        and we need to specify what key the music is actually in, then transpose accordingly.
+        
+        Args:
+            content: MusicXML content string
+            source_key: Actual key of the input music (e.g., 'bb_major')
+            target_instrument: Target instrument (e.g., 'eb_alto_sax')
+            
+        Returns:
+            Modified content with corrected key signature and transposed notes
+        """
+        if not source_key or not target_instrument:
+            return content
+            
+        print(f"Transposing from source key {source_key} for {target_instrument}...")
+        
+        # Get transposition interval for target instrument
+        instrument_config = self.INSTRUMENT_CORRECTIONS.get(target_instrument)
+        if not instrument_config:
+            print(f"  No transposition config for {target_instrument}")
+            return content
+            
+        # Calculate key signature transposition
+        source_key_fifths = self.KEY_SIGNATURES[source_key]
+        
+        # For transposing instruments, we transpose UP to get the written part
+        # (opposite of the instrument's normal transposition direction)
+        transpose_semitones = -instrument_config['transpose_chromatic']  # Reverse direction
+        
+        # Calculate target key signature using circle of fifths
+        # Each perfect fifth = 7 semitones, so semitones / 7 = fifths movement
+        # But we need to handle this more carefully for proper key relationships
+        fifths_change = 0
+        if transpose_semitones == 9:  # Major 6th up (Eb alto sax)
+            # Bb major (-2) + major 6th = G major (+1) -> difference of +3 fifths
+            fifths_change = 3
+        elif transpose_semitones == 2:  # Major 2nd up (Bb trumpet) 
+            # Bb major (-2) + major 2nd = C major (0) -> difference of +2 fifths
+            fifths_change = 2
+        elif transpose_semitones == -5:  # Perfect 4th down (F horn)
+            # Bb major (-2) - perfect 4th = Eb major (-3) -> difference of -1 fifth
+            fifths_change = -1
+        else:
+            # Generic calculation: approximate using semitone to fifth conversion
+            fifths_change = (transpose_semitones * 7) // 12
+        
+        target_key_fifths = source_key_fifths + fifths_change
+        
+        # Clamp to valid range (-7 to +7)
+        target_key_fifths = max(-7, min(7, target_key_fifths))
+        
+        # Detect original key signature in the file to correct accidentals
+        original_key_match = re.search(r'<fifths>([+-]?\d+)</fifths>', content)
+        original_key_fifths = int(original_key_match.group(1)) if original_key_match else 0
+        
+        print(f"  Original key in file: {original_key_fifths} fifths")
+        print(f"  Correct written key should be: {target_key_fifths} fifths")
+        print(f"  Notes: correcting accidentals for OMR key signature error")
+        
+        # Correct accidentals based on the difference between 
+        # what OMR incorrectly put vs. what the written key should actually be
+        content = self.correct_accidentals_for_key_change(content, original_key_fifths, target_key_fifths)
+        
+        # Update key signature to correct written key
+        content = self.update_key_signature(content, target_key_fifths)
+        
+        return content
+    
+    def update_key_signature(self, content, target_fifths):
+        """Update key signature to specified number of fifths."""
+        key_pattern = r'<key[^>]*>.*?</key>'
+        
+        def replace_key(match):
+            new_key = f'<key><fifths>{target_fifths}</fifths></key>'
+            return new_key
+        
+        return re.sub(key_pattern, replace_key, content, flags=re.DOTALL)
+    
+    def transpose_all_notes(self, content, semitones):
+        """Transpose all pitches by the specified number of semitones."""
+        notes_transposed = 0
+        
+        def transpose_pitch_block(match):
+            nonlocal notes_transposed
+            
+            pitch_content = match.group(1)
+            
+            # Extract step, octave, and alter
+            step_match = re.search(r'<step>([A-G])</step>', pitch_content)
+            octave_match = re.search(r'<octave>(\d+)</octave>', pitch_content)
+            alter_match = re.search(r'<alter>([-]?\d+)</alter>', pitch_content)
+            
+            if not step_match or not octave_match:
+                return match.group(0)
+                
+            step = step_match.group(1)
+            octave = int(octave_match.group(1))
+            alter = int(alter_match.group(1)) if alter_match else 0
+            
+            # Convert to MIDI note number
+            note_values = {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}
+            midi_note = (octave * 12) + note_values[step] + alter
+            
+            # Transpose
+            new_midi_note = midi_note + semitones
+            
+            # Convert back to note names
+            new_octave = new_midi_note // 12
+            pitch_class = new_midi_note % 12
+            
+            # Find the best enharmonic spelling (prefer naturals when possible)
+            note_names = [(0, 'C', 0), (1, 'C', 1), (2, 'D', 0), (3, 'D', 1), (4, 'E', 0), (5, 'F', 0),
+                         (6, 'F', 1), (7, 'G', 0), (8, 'G', 1), (9, 'A', 0), (10, 'A', 1), (11, 'B', 0)]
+            
+            for pc, note_step, note_alter in note_names:
+                if pc == pitch_class:
+                    new_step = note_step
+                    new_alter = note_alter
+                    break
+            
+            # Build new pitch content
+            new_pitch_content = f'<step>{new_step}</step>\n      <octave>{new_octave}</octave>'
+            if new_alter != 0:
+                new_pitch_content += f'\n      <alter>{new_alter}</alter>'
+            
+            notes_transposed += 1
+            return f'<pitch>{new_pitch_content}</pitch>'
+        
+        # Apply transposition to all pitches
+        content = re.sub(r'<pitch>(.*?)</pitch>', transpose_pitch_block, content, flags=re.DOTALL)
+        
+        if notes_transposed > 0:
+            print(f"  Transposed {notes_transposed} notes for source key correction")
+            
+        return content
+    
+    def correct_accidentals_for_key_change(self, content, original_key_fifths, corrected_key_fifths):
+        """
+        Correct note accidentals when changing key signature due to OMR errors.
+        
+        When OMR incorrectly reads key signature, it affects which notes get accidentals.
+        This function corrects those notes to match the actual source key.
+        
+        Args:
+            content: MusicXML content string
+            original_key_fifths: Key signature that was incorrectly in the file
+            corrected_key_fifths: Actual source key signature
+            
+        Returns:
+            Content with corrected note accidentals
+        """
+        if original_key_fifths == corrected_key_fifths:
+            return content
+            
+        print(f"Correcting accidentals for key change: {original_key_fifths} -> {corrected_key_fifths} fifths...")
+        
+        # Define the order of sharps and flats
+        sharp_order = ['F', 'C', 'G', 'D', 'A', 'E', 'B']  # Order sharps are added
+        flat_order = ['B', 'E', 'A', 'D', 'G', 'C', 'F']   # Order flats are added
+        
+        # Determine which notes need correction
+        notes_to_naturalize = []  # Notes that were sharp/flat but should be natural
+        notes_to_sharp = []       # Notes that were natural but should be sharp
+        notes_to_flat = []        # Notes that were natural but should be flat
+        
+        # Calculate difference in accidentals
+        key_diff = corrected_key_fifths - original_key_fifths
+        
+        if key_diff > 0:  # Moving to more sharps (or fewer flats)
+            if original_key_fifths < 0 and corrected_key_fifths >= 0:
+                # From flats to sharps/natural
+                for i in range(abs(original_key_fifths)):
+                    if i < len(flat_order):
+                        notes_to_naturalize.append(flat_order[i])
+                for i in range(corrected_key_fifths):
+                    if i < len(sharp_order):
+                        notes_to_sharp.append(sharp_order[i])
+            elif original_key_fifths < 0 and corrected_key_fifths < 0:
+                # From more flats to fewer flats
+                for i in range(abs(original_key_fifths)):
+                    if i >= abs(corrected_key_fifths) and i < len(flat_order):
+                        notes_to_naturalize.append(flat_order[i])
+            else:  # Both positive (adding more sharps)
+                for i in range(original_key_fifths, corrected_key_fifths):
+                    if i < len(sharp_order):
+                        notes_to_sharp.append(sharp_order[i])
+                        
+        elif key_diff < 0:  # Moving to fewer sharps (or more flats)
+            if original_key_fifths > 0 and corrected_key_fifths <= 0:
+                # From sharps to flats/natural
+                for i in range(original_key_fifths):
+                    if i < len(sharp_order):
+                        notes_to_naturalize.append(sharp_order[i])
+                for i in range(abs(corrected_key_fifths)):
+                    if i < len(flat_order):
+                        notes_to_flat.append(flat_order[i])
+            elif original_key_fifths > 0 and corrected_key_fifths > 0:
+                # From more sharps to fewer sharps
+                for i in range(corrected_key_fifths, original_key_fifths):
+                    if i < len(sharp_order):
+                        notes_to_naturalize.append(sharp_order[i])
+            else:  # Both negative (adding more flats)
+                for i in range(abs(corrected_key_fifths)):
+                    if i >= abs(original_key_fifths) and i < len(flat_order):
+                        notes_to_flat.append(flat_order[i])
+        
+        corrections_made = 0
+        
+        def correct_pitch_block(match):
+            nonlocal corrections_made
+            pitch_content = match.group(1)
+            
+            # Extract step and current alter
+            step_match = re.search(r'<step>([A-G])</step>', pitch_content)
+            alter_match = re.search(r'<alter>([+-]?\d+(?:\.\d+)?)</alter>', pitch_content)
+            octave_match = re.search(r'<octave>(\d+)</octave>', pitch_content)
+            
+            if not step_match or not octave_match:
+                return match.group(0)
+                
+            step = step_match.group(1)
+            current_alter = float(alter_match.group(1)) if alter_match else 0.0
+            octave = octave_match.group(1)
+            
+            new_alter = current_alter
+            correction_made = False
+            
+            # Apply corrections based on key change
+            if step in notes_to_naturalize and current_alter != 0:
+                new_alter = 0.0
+                correction_made = True
+                print(f"  Naturalized {step}{octave} (was {'+' if current_alter > 0 else ''}{current_alter})")
+                
+            elif step in notes_to_sharp and current_alter == 0:
+                new_alter = 1.0
+                correction_made = True  
+                print(f"  Sharped {step}{octave} (was natural)")
+                
+            elif step in notes_to_flat and current_alter == 0:
+                new_alter = -1.0
+                correction_made = True
+                print(f"  Flatted {step}{octave} (was natural)")
+            
+            if correction_made:
+                corrections_made += 1
+                
+                # Build new pitch content
+                new_pitch_content = f'<step>{step}</step>\n      <octave>{octave}</octave>'
+                if new_alter != 0:
+                    alter_str = str(int(new_alter)) if new_alter.is_integer() else str(new_alter)
+                    new_pitch_content += f'\n      <alter>{alter_str}</alter>'
+                
+                return f'<pitch>{new_pitch_content}</pitch>'
+            
+            return match.group(0)
+        
+        # Apply corrections to all pitches
+        content = re.sub(r'<pitch>(.*?)</pitch>', correct_pitch_block, content, flags=re.DOTALL)
+        
+        if corrections_made > 0:
+            print(f"  Corrected {corrections_made} note accidentals for key signature change")
+            
+        return content
+    
+    def validate_xml_structure(self, filepath):
+        """
+        Validate that the output XML file is structurally valid.
+        
+        Args:
+            filepath: Path to the XML file to validate
+            
+        Returns:
+            tuple: (is_valid, error_message)
+        """
+        try:
+            # Parse the XML to check for structural validity
+            tree = ET.parse(filepath)
+            root = tree.getroot()
+            
+            # Basic MusicXML structure checks
+            if root.tag != 'score-partwise':
+                return False, f"Invalid root element: {root.tag} (expected 'score-partwise')"
+            
+            # Check for required elements
+            part_list = root.find('part-list')
+            if part_list is None:
+                return False, "Missing required 'part-list' element"
+            
+            parts = root.findall('part')
+            if not parts:
+                return False, "No 'part' elements found"
+            
+            # Check for basic measure structure in first part
+            if parts:
+                measures = parts[0].findall('measure')
+                if not measures:
+                    return False, "No 'measure' elements found in first part"
+            
+            return True, "XML structure is valid"
+            
+        except ET.ParseError as e:
+            return False, f"XML parse error: {e}"
+        except Exception as e:
+            return False, f"Validation error: {e}"
     
     def add_saxophone_fingerings(self, content, fingering_style="numbers"):
         """
@@ -2214,6 +2694,10 @@ def main():
     parser.add_argument('--source-instrument', type=str, required=True,
                        choices=['bb_trumpet', 'concert_pitch', 'eb_alto_sax', 'f_horn', 'c_euphonium', 'bb_clarinet', 'flute'],
                        help='REQUIRED: Correct instrument metadata to match the actual source instrument. Essential because MusicXML metadata is often incorrect.')
+    parser.add_argument('--source-key', type=str,
+                       choices=['c_major', 'g_major', 'd_major', 'a_major', 'e_major', 'b_major', 'fs_major', 'cs_major',
+                               'f_major', 'bb_major', 'eb_major', 'ab_major', 'db_major', 'gb_major', 'cb_major'],
+                       help='Specify the actual concert key of the source music (overrides any incorrect key signature from OMR). Use this when the input key signature is wrong.')
     parser.add_argument('--no-clean-credits', action='store_true',
                        help='Skip cleaning up multi-line credit text (credit cleaning is enabled by default)')
     parser.add_argument('--remove-multimeasure-rests', action='store_true',
@@ -2273,7 +2757,7 @@ def main():
     rehearsal_mode = None if args.rehearsal == 'none' else args.rehearsal
     clean_credits = not args.no_clean_credits  # Clean credits by default, disable with --no-clean-credits
     remove_breaks = not args.keep_page_system_breaks  # Remove breaks by default, keep with --keep-page-system-breaks
-    success = simplifier.simplify_file(args.input, str(output_path), args.rules, rehearsal_mode, args.center_title, args.sync_part_names, args.auto_sync_part_names, source_instrument, clean_credits, args.remove_multimeasure_rests, remove_breaks, args.add_fingerings, args.fingering_style, args.skip_rhythm_simplification, args.add_courtesy_accidentals, args.add_courtesy_fingerings)
+    success = simplifier.simplify_file(args.input, str(output_path), args.rules, rehearsal_mode, args.center_title, args.sync_part_names, args.auto_sync_part_names, source_instrument, args.source_key, clean_credits, args.remove_multimeasure_rests, remove_breaks, args.add_fingerings, args.fingering_style, args.skip_rhythm_simplification, args.add_courtesy_accidentals, args.add_courtesy_fingerings)
     
     if success:
         print("SUCCESS: Simplification completed successfully!")
