@@ -1882,11 +1882,20 @@ class MusicXMLSimplifier:
                         if octave < 2 or (octave == 2 and step in ['E', 'F']):
                             needs_transposition = True
                             transpose_direction = 'up'
-                    else:  # Alto saxophone
+                    elif source_instrument == 'eb_alto_sax':
                         # Transpose D5 and above DOWN an octave (C5 is now considered easy)
                         if octave > 5 or (octave == 5 and step in ['D', 'E', 'F', 'G', 'A', 'B']):
                             needs_transposition = True
                             transpose_direction = 'down'
+                    elif source_instrument == 'bb_trumpet':
+                        # Trumpet: No additional octave transposition needed after source-key correction
+                        # The source-key transposition (concert Bb -> written C) handles everything
+                        pass
+                    elif source_instrument == 'f_horn':
+                        # Horn: No additional octave transposition needed after source-key correction  
+                        # The source-key transposition (concert Bb -> written F) handles everything
+                        pass
+                    # Other instruments have no defined range constraints
                     
                     notes_info.append({
                         'step': step,
@@ -1898,11 +1907,20 @@ class MusicXMLSimplifier:
                         'reason': 'Range constraint' if needs_transposition else None
                     })
         
-        # Apply nearby note logic to improve transposition decisions
-        if len(notes_info) > 1:
+        # Apply proximity logic ONLY if we actually made range-based transpositions
+        # We don't want to "improve" the original composition, only optimize necessary range adjustments
+        notes_with_range_transpositions = [note for note in notes_info if note['needs_transposition']]
+        
+        if len(notes_info) > 1 and notes_with_range_transpositions:
+            print(f"  Applying proximity logic for {source_instrument} ({len(notes_with_range_transpositions)} notes flagged for range adjustment)...")
             self.apply_nearby_note_logic(notes_info, source_instrument)
             # Stage 2: Catch super obvious improvements that anyone could see
             self.apply_obvious_proximity_fixes(notes_info, source_instrument)
+        else:
+            if not notes_with_range_transpositions:
+                print(f"  Skipping proximity logic for {source_instrument} (no notes need range adjustment)")
+            else:
+                print(f"  Skipping proximity logic for {source_instrument} (insufficient note context)")
         
         # Now apply transpositions based on analysis
         notes_transposed = 0
